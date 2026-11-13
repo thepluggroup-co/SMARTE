@@ -1,0 +1,17 @@
+{
+  "name": "Smarte Solutions",
+  "short_name": "Smarte",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#232d85",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "/icone.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
