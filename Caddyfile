@@ -1,0 +1,4 @@
+{$ERP_DOMAINE} {
+	encode gzip
+	reverse_proxy application:3000
+}

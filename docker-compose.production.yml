@@ -1,0 +1,71 @@
+# Copier .env.production.exemple vers .env et remplir chaque valeur. Chaque service ne reçoit que ce qui lui sert.
+services:
+  base:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: erp_proprio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: erp
+    volumes: ["donnees:/var/lib/postgresql/data", "./sauvegardes:/sauvegardes"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_proprio -d erp"]
+      interval: 10s
+      retries: 10
+  # Installation et mises à jour seulement : docker compose -f docker-compose.production.yml run --rm migration
+  migration:
+    build: .
+    profiles: ["outils"]
+    command: ["node", "--import", "tsx", "scripts/migrer.ts"]
+    environment:
+      DATABASE_ADMIN_URL: postgres://erp_proprio:${POSTGRES_PASSWORD:?}@base:5432/erp
+      ERP_APP_MOT_DE_PASSE: ${ERP_APP_MOT_DE_PASSE:?}
+    depends_on:
+      base:
+        condition: service_healthy
+  # Premier démarrage seulement.
+  provisionnement:
+    build: .
+    profiles: ["outils"]
+    command: ["node", "--import", "tsx", "scripts/provisionner-sgc.ts"]
+    environment:
+      DATABASE_ADMIN_URL: postgres://erp_proprio:${POSTGRES_PASSWORD:?}@base:5432/erp
+      SGC_ADMIN_EMAIL: ${SGC_ADMIN_EMAIL:-}
+      SGC_ADMIN_MOT_DE_PASSE: ${SGC_ADMIN_MOT_DE_PASSE:-}
+    depends_on:
+      base:
+        condition: service_healthy
+  application:
+    build: .
+    restart: always
+    environment:
+      PORT: "3000"
+      DATABASE_URL: postgres://erp_app:${ERP_APP_MOT_DE_PASSE:?}@base:5432/erp
+      ERP_CLE_SECRETS: ${ERP_CLE_SECRETS:?}
+      ERP_URL_PUBLIQUE: https://${ERP_DOMAINE:?}
+      ERP_DERRIERE_PROXY: oui
+      ERP_DOSSIER_MEDIAS: /medias
+      ERP_IA_CLE: ${ERP_IA_CLE:-}
+      ERP_IA_MODELE: ${ERP_IA_MODELE:-}
+      # Console : laisser vide tant qu'aucun autre client n'est servi. Elle reste alors fermée.
+      ERP_CONSOLE_CLE: ${ERP_CONSOLE_CLE:-}
+      DATABASE_ADMIN_URL: ${ERP_CONSOLE_ADMIN_URL:-}
+    depends_on:
+      base:
+        condition: service_healthy
+    volumes: ["medias:/medias"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/sante').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+  web:
+    image: caddy:2
+    restart: always
+    ports: ["80:80", "443:443"]
+    environment:
+      ERP_DOMAINE: ${ERP_DOMAINE:?}
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy:/data"]
+    depends_on: [application]
+volumes:
+  donnees:
+  medias:
+  caddy:
