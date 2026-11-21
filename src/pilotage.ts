@@ -27,6 +27,37 @@ const SUITES: Record<string, string[]> = {
 export const transitionPermise = (de: string, vers: string) => SUITES[de]?.includes(vers) ?? false;
 export const commission = (base: number, taux: number) => Math.round((base * taux) / 100);
 
+export interface NouveauColis {
+  entiteId: string; destinataire: string; telephone?: string; adresse?: string; zoneId?: string; transporteur?: string; documentId?: string; aEncaisser?: number;
+}
+
+/** Le droit sur l'entité se vérifie avant l'appel. La zone doit appartenir à l'entité du colis. */
+export async function creerColis(ctx: Contexte, b: NouveauColis): Promise<Record<string, any>> {
+  if (b.documentId) {
+    const { rows: [d] } = await ctx.client.query("select tiers_id from documents_vente where id = $1", [b.documentId]);
+    await exigerNonBloque(ctx.client, d?.tiers_id, "livraison");
+  }
+  let prevu: string | null = null;
+  if (b.zoneId) {
+    const { rows: [z] } = await ctx.client.query("select ((now() at time zone 'Africa/Douala')::date + delai_jours)::text as prevu from zones_livraison where id = $1 and entite_id = $2", [b.zoneId, b.entiteId]);
+    if (!z) throw new ErreurApi(404, "introuvable");
+    prevu = z.prevu;
+  }
+  if (b.documentId) {
+    const { rows: [d] } = await ctx.client.query("select entite_branche(entite_id) as b, entite_branche($2) as e from documents_vente where id = $1", [b.documentId, b.entiteId]);
+    if (!d || d.b !== d.e) throw new ErreurApi(404, "introuvable");
+  }
+  const numero = await prochainNumero(ctx.client, `COL-${new Date().getFullYear()}`);
+  const code = String(100000 + (randomBytes(4).readUInt32BE(0) % 900000));
+  const { rows: [x] } = await ctx.client.query(
+    `insert into colis (organisation_id, entite_id, numero, code_suivi, code_confirmation, destinataire, telephone, adresse, zone_id, transporteur, document_id, a_encaisser, prevu_le)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning *`,
+    [ctx.organisationId, b.entiteId, numero, randomBytes(16).toString("base64url"), code, b.destinataire, b.telephone ?? null, b.adresse ?? null, b.zoneId ?? null, b.transporteur ?? null, b.documentId ?? null, b.aEncaisser ?? 0, prevu],
+  );
+  await ctx.client.query("insert into etapes_colis (organisation_id, colis_id, statut, auteur_id) values ($1, $2, 'prepare', $3)", [ctx.organisationId, x.id, ctx.utilisateurId]);
+  return x;
+}
+
 export function enregistrerPilotage(app: FastifyInstance, pool: pg.Pool, outils: Outils, urlPublique: string): void {
   const { protege, exiger, exigerSurEntite } = outils;
   const ids = async (ctx: Contexte, p: "pilotage.voir" | "transport.voir" | "affiliation.voir") =>
@@ -258,30 +289,8 @@ export function enregistrerPilotage(app: FastifyInstance, pool: pg.Pool, outils:
     },
   }, async (req, reponse) => {
     const c = await protege(req, async (ctx) => {
-      const b = req.body;
-      await exigerSurEntite(ctx, "transport.gerer", b.entiteId);
-      if (b.documentId) {
-        const { rows: [d] } = await ctx.client.query("select tiers_id from documents_vente where id = $1", [b.documentId]);
-        await exigerNonBloque(ctx.client, d?.tiers_id, "livraison");
-      }
-      let prevu: string | null = null;
-      if (b.zoneId) {
-        const { rows: [z] } = await ctx.client.query("select ((now() at time zone 'Africa/Douala')::date + delai_jours)::text as prevu from zones_livraison where id = $1 and entite_id = $2", [b.zoneId, b.entiteId]);
-        if (!z) throw new ErreurApi(404, "introuvable");
-        prevu = z.prevu;
-      }
-      if (b.documentId) {
-        const { rows: [d] } = await ctx.client.query("select entite_branche(entite_id) as b, entite_branche($2) as e from documents_vente where id = $1", [b.documentId, b.entiteId]);
-        if (!d || d.b !== d.e) throw new ErreurApi(404, "introuvable");
-      }
-      const numero = await prochainNumero(ctx.client, `COL-${new Date().getFullYear()}`);
-      const code = String(100000 + (randomBytes(4).readUInt32BE(0) % 900000));
-      const { rows: [x] } = await ctx.client.query(
-        `insert into colis (organisation_id, entite_id, numero, code_suivi, code_confirmation, destinataire, telephone, adresse, zone_id, transporteur, document_id, a_encaisser, prevu_le)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning *`,
-        [ctx.organisationId, b.entiteId, numero, randomBytes(16).toString("base64url"), code, b.destinataire, b.telephone ?? null, b.adresse ?? null, b.zoneId ?? null, b.transporteur ?? null, b.documentId ?? null, b.aEncaisser ?? 0, prevu],
-      );
-      await ctx.client.query("insert into etapes_colis (organisation_id, colis_id, statut, auteur_id) values ($1, $2, 'prepare', $3)", [ctx.organisationId, x.id, ctx.utilisateurId]);
+      await exigerSurEntite(ctx, "transport.gerer", req.body.entiteId);
+      const x = await creerColis(ctx, req.body);
       return { ...x, lien_suivi: `${urlPublique}/suivi.html?c=${ctx.organisationId}.${x.code_suivi}` };
     });
     return reponse.status(201).send(c);

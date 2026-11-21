@@ -322,7 +322,14 @@ const MESSAGES = {
   quota_depasse: "Trop de requêtes. Réessayez dans une minute.",
   motif_obligatoire: "Indiquez le motif de la perte.",
   doublon_probable: "Une fiche avec ce téléphone ou cet e-mail existe déjà.",
-  module_inactif: "Le module Formations n'est pas activé pour cette entité.",
+  module_inactif: "Ce module n'est pas activé pour cette entité.",
+  lieu_invalide: "Ce lieu n'est pas proposé en ligne.",
+  zone_invalide: "Cette zone de livraison n'est pas proposée.",
+  point_relais_invalide: "Ce point relais n'est pas disponible.",
+  mode_livraison_invalide: "Ce mode de livraison n'est pas proposé.",
+  commande_non_modifiable: "Cette commande est déjà traitée.",
+  confirmation_impossible: "Seule une commande payée à la livraison se confirme ici ; les autres attendent le paiement en ligne.",
+  boutique_deja_active: "Une autre branche a déjà sa boutique en ligne ouverte.",
 };
 const texteErreur = (e) => e instanceof TypeError ? "Pas de connexion. Réessayez quand internet revient." : MESSAGES[e.code] || "Une erreur est survenue. Réessayez.";
 
@@ -421,6 +428,7 @@ function vue(...contenu) {
       dansEspace("commerce") && droits.includes("stocks.voir") ? h("button", { class: "discret", onclick: () => ecranRayons() }, "Rayons et étiquettes") : null,
       dansEspace("commerce") && droits.includes("transport.voir") ? h("button", { class: "discret", onclick: () => ecranRelais() }, "Points relais") : null,
       dansEspace("commerce") && droits.includes("facturation.voir") && droits.includes("stocks.voir") ? h("button", { class: "discret", onclick: () => ecranPortail() }, "Portail grossiste") : null,
+      dansEspace("commerce") && droits.includes("facturation.voir") ? h("button", { class: "discret", onclick: () => ecranCommandesEnLigne() }, "Commandes en ligne") : null,
       dansEspace("commerce") && droits.includes("care.voir") ? h("button", { class: "discret", onclick: () => ecranCare() }, "GLOMARI Care") : null,
       dansEspace("commerce") && droits.includes("reseau.voir") ? h("button", { class: "discret", onclick: () => ecranReseau() }, "Vendeurs et gros") : null,
       h("button", { class: "discret", onclick: () => ecranMonEspace() }, "Mon espace"),
