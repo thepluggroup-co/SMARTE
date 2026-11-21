@@ -47,6 +47,7 @@ import { enregistrerRecouvrement } from "./recouvrement.js";
 import { enregistrerSocle } from "./socle.js";
 import { enregistrerFournisseurs } from "./fournisseurs.js";
 import { enregistrerMall } from "./mall.js";
+import { enregistrerCanalEnLigne, expirerCommandesWeb } from "./canalenligne.js";
 import { enregistrerPilotage } from "./pilotage.js";
 import { enregistrerRh } from "./rh.js";
 import { enregistrerTresorerie } from "./tresorerie.js";
@@ -804,6 +805,7 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
   enregistrerRapports(app, { protege, exigerSurEntite, exiger });
   enregistrerCommerce(app, pool, { protege, exigerSurEntite, exiger }, options.urlPublique);
   enregistrerMall(app, pool, { protege, exigerSurEntite, exiger }, options.urlPublique);
+  enregistrerCanalEnLigne(app, pool, { protege, exigerSurEntite, exiger }, taches, options.urlPublique);
   enregistrerRecouvrement(app, { protege, exigerSurEntite, exiger });
   enregistrerProspection(app, pool, { protege, exigerSurEntite, exiger });
   enregistrerSocle(app, { protege, exigerSurEntite, exiger });
@@ -817,8 +819,15 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
     };
     const minuterie = setInterval(() => { tour().catch((e) => app.log.error(e, "tâches planifiées")); }, 3600000);
     const envoi = setInterval(() => { app.pousserWebhooks?.().catch((e: unknown) => app.log.error(e, "webhooks")); }, 60000);
-    minuterie.unref(); envoi.unref();
-    app.addHook("onClose", async () => { clearInterval(minuterie); clearInterval(envoi); });
+    // Une réservation de commande en ligne dure 30 minutes : la tâche horaire la laisserait bloquer la caisse trop longtemps.
+    const expiration = setInterval(() => {
+      (async () => {
+        const { rows } = await pool.query("select id from registre_organisations");
+        for (const r of rows) await dansOrganisation(pool, r.id, expirerCommandesWeb);
+      })().catch((e) => app.log.error(e, "expiration commandes web"));
+    }, 60000);
+    minuterie.unref(); envoi.unref(); expiration.unref();
+    app.addHook("onClose", async () => { clearInterval(minuterie); clearInterval(envoi); clearInterval(expiration); });
   }
   enregistrerTresorerie(app, { protege, exigerSurEntite, exiger });
   enregistrerUniversite(app, { protege, exigerSurEntite, exiger }, options.urlPublique);

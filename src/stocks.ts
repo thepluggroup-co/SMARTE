@@ -14,6 +14,12 @@ export async function niveau(c: Client, entiteId: string, produitId: string): Pr
   return rows[0].q;
 }
 
+/** Physique moins réservé moins avarié : la même formule (quantite_vendable, migration 0046) pour la caisse, le canal en ligne et ses événements. */
+export async function quantiteDisponible(c: Client, entiteId: string, produitId: string): Promise<number> {
+  const { rows } = await c.query("select quantite_vendable($1, $2)::float as q", [entiteId, produitId]);
+  return rows[0].q;
+}
+
 /** Le verrou sur le produit empêche deux sorties simultanées de vendre la même pièce. */
 export async function produitSuivi(c: Client, produitId: string) {
   const { rows } = await c.query("select id, nom, suivi_stock, cout_moyen from produits where id = $1 for update", [produitId]);
@@ -25,11 +31,8 @@ export async function produitSuivi(c: Client, produitId: string) {
 export async function sortirDuStock(
   ctx: Contexte, entiteId: string, produitId: string, q: number, type: string, motif: string | null, documentId: string | null, reference: string | null = null, autoriserNegatif = false,
 ): Promise<void> {
-  // Ce qui est réservé n'est plus à vendre ; un inventaire, lui, constate le stock réel.
-  const { rows: [r] } = type === "ajustement" ? { rows: [{ q: 0 }] } : await ctx.client.query("select coalesce(sum(quantite), 0)::float as q from reservations_stock where entite_id = $1 and produit_id = $2 and levee_le is null and (expire_le is null or expire_le >= (now() at time zone 'Africa/Douala')::date)", [entiteId, produitId]);
-  // Un article avarié est mis de côté : il ne se vend plus et ne se transfère plus, sauf sa propre sortie en perte.
-  const { rows: [av] } = type === "ajustement" ? { rows: [{ q: 0 }] } : await ctx.client.query("select coalesce(sum(quantite), 0)::float as q from avaries where entite_id = $1 and produit_id = $2 and statut = 'constatee'", [entiteId, produitId]);
-  const disponible = (await niveau(ctx.client, entiteId, produitId)) - r.q - av.q;
+  // Ce qui est réservé ou avarié n'est plus à vendre ; un inventaire, lui, constate le stock réel.
+  const disponible = type === "ajustement" ? await niveau(ctx.client, entiteId, produitId) : await quantiteDisponible(ctx.client, entiteId, produitId);
   if (q > disponible && !autoriserNegatif) throw new ErreurApi(409, "stock_insuffisant", { produitId, disponible });
   const { rows } = await ctx.client.query("select cout_moyen from produits where id = $1", [produitId]);
   await ctx.client.query(
