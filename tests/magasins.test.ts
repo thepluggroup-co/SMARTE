@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
+import { LIEUX_GLOMARI, provisionnerLieuxGlomari } from "../src/provisionnement.js";
 import { environnement, MOT_DE_PASSE } from "./outils.js";
 
 const env = await environnement();
@@ -76,6 +77,23 @@ describe("magasins et points de vente", () => {
     expect((await env.api("GET", "/magasins", o.jeton)).corps[0].actif).toBe(false);
     expect((await env.api("PATCH", url, o.jeton, { actif: true })).corps.actif).toBe(true);
     expect((await env.api("POST", "/stocks/mouvements", o.jeton, { ...entree, type: "entree", coutUnitaire: 1 })).statut).toBe(201);
+  });
+
+  it("crée les lieux de départ de GLOMARI une seule fois, même relancé ou lancé deux fois en même temps", async () => {
+    const noms = LIEUX_GLOMARI.map((l) => l.nom);
+    const attendus = LIEUX_GLOMARI.map((l) => `${l.type} ${l.nom}`).sort();
+    const o = await env.nouvelleOrganisation();
+    expect(await provisionnerLieuxGlomari(env.poolAdmin, o.organisationId)).toEqual({ crees: noms, existants: [] });
+    expect(await provisionnerLieuxGlomari(env.poolAdmin, o.organisationId)).toEqual({ crees: [], existants: noms });
+    const lieux = (await env.api("GET", "/magasins", o.jeton)).corps as { id: string; nom: string; type: string; parent_id: string }[];
+    expect(lieux.map((l) => `${l.type} ${l.nom}`).sort()).toEqual(attendus);
+    expect(lieux.every((l) => l.parent_id === o.entites.GLOMARI)).toBe(true);
+    const p = await article(o);
+    expect((await env.api("POST", "/stocks/mouvements", o.jeton, { entiteId: lieux[0]!.id, produitId: p, type: "entree", quantite: 1, coutUnitaire: 1 })).statut).toBe(201);
+
+    const autre = await env.nouvelleOrganisation();
+    await Promise.all([provisionnerLieuxGlomari(env.poolAdmin, autre.organisationId), provisionnerLieuxGlomari(env.poolAdmin, autre.organisationId)]);
+    expect((await env.api("GET", "/magasins", autre.jeton)).corps).toHaveLength(LIEUX_GLOMARI.length);
   });
 });
 

@@ -18,11 +18,12 @@ $C --profile outils build
 $C up -d base
 $C run --rm migration
 $C run --rm provisionnement
+$C run --rm provisionnement node --import tsx scripts/provisionnerglomari.ts   # lieux de GLOMARI, relançable
 $C up -d application web
 curl -f https://<domaine>/sante
 ```
 
-Vider ensuite `SGC_ADMIN_MOT_DE_PASSE` dans `.env`. Conserver `ERP_CLE_SECRETS` hors du serveur : sans elle, les données chiffrées sont perdues. Se connecter, changer le mot de passe et activer la double authentification depuis « Mon compte ».
+La deuxième commande de provisionnement crée sous GLOMARI les lieux « GLOMARI Mall Douala », « Entrepôt GLOMARI Mall Douala » et « Agence de Yaoundé » ; relancée, elle ne recrée rien (en local : `npm run provisionner:glomari`). Vider ensuite `SGC_ADMIN_MOT_DE_PASSE` dans `.env`. Conserver `ERP_CLE_SECRETS` hors du serveur : sans elle, les données chiffrées sont perdues. Se connecter, changer le mot de passe et activer la double authentification depuis « Mon compte ».
 
 ## Sauvegardes
 
