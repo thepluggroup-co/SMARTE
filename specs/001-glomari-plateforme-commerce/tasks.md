@@ -128,9 +128,9 @@ description: "Liste des tâches du module canal en ligne GLOMARI (lot 1)"
 - [X] T028 [P] Mettre à jour `docs/Couverture du cahier des charges.md` : canal en ligne lot 1 couvert ; paiement, notifications et compte client à venir
 - [X] T029 [P] Dans `docs/Fiche technique globale GLOMARI.md`, remplacer `src/canal_en_ligne.ts` par `src/canalenligne.ts` (l. 202 et l. 416) et ajouter `commande_web.confirmee` à la liste des événements (section 6.3)
 - [X] T030 Relire `src/canalenligne.ts` : aucune requête publique avec `*` ni `cout_moyen` ; chaque route interne appelle `exigerSurEntite` ; chaque code passé à `ErreurApi` a son message dans `public/app.js` ; aucun secret
-- [ ] T031 Supprimer la base `erp_test`, lancer `npx tsc --noEmit` puis `TEST_ADMIN_URL=postgres://erp_proprio:erp_proprio@localhost:5432/postgres npm test` : tout vert avec le rôle restreint
+- [X] T031 Supprimer la base `erp_test`, lancer `npx tsc --noEmit` puis `TEST_ADMIN_URL=postgres://erp_proprio:erp_proprio@localhost:5432/postgres npm test` : tout vert avec le rôle restreint
 - [ ] T032 Dérouler les scénarios et le contrôle manuel de `specs/001-glomari-plateforme-commerce/quickstart.md`
-- [ ] T033 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre les contrôles GitHub au vert (`.github/workflows/verification.yml`)
+- [X] T033 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre les contrôles GitHub au vert (`.github/workflows/verification.yml`)
 
 ---
 
