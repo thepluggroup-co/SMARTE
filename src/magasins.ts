@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { publierEvenement } from "./base.js";
+import { publierEvenement, type Client } from "./base.js";
 import { prochainNumero } from "./formations.js";
 import { aPermissionSurEntite, entitesAccessibles } from "./permissions.js";
 import { ErreurApi, type Outils } from "./serveur.js";
@@ -8,11 +8,31 @@ const uuid = { type: "string", format: "uuid" } as const;
 /** Un nouveau lieu peut immédiatement recevoir du stock et vendre. */
 const MODULES_DU_MAGASIN = ["achats_stocks", "facturation", "commerce"];
 
+export type TypeLieu = "point_de_vente" | "entrepot";
+
+/** Le droit sur le parent se vérifie avant l'appel. */
+export async function creerMagasin(c: Client, organisationId: string, parentId: string, nom: string, type: TypeLieu) {
+  const code = await prochainNumero(c, "MAG");
+  const { rows } = await c.query(
+    `insert into entites (organisation_id, parent_id, code, nom, type, domaine)
+     values ($1, $2, $3, $4, $5, (select domaine from entites where id = $2)) returning id, parent_id, code, nom, type, actif`,
+    [organisationId, parentId, code, nom, type],
+  );
+  for (const module of MODULES_DU_MAGASIN) {
+    await c.query(
+      "insert into modules_entite (organisation_id, entite_id, module, actif) values ($1, $2, $3, true)",
+      [organisationId, rows[0].id, module],
+    );
+  }
+  await publierEvenement(c, "magasin.cree", { id: rows[0].id });
+  return rows[0];
+}
+
 export function enregistrerMagasins(app: FastifyInstance, outils: Outils): void {
   const { protege, exiger, exigerSurEntite } = outils;
 
   /** Le droit lui-même exige le module de stock sur le parent : aucun magasin ne peut naître sous GTA. */
-  app.post<{ Body: { parentId: string; nom: string; type: string } }>("/magasins", {
+  app.post<{ Body: { parentId: string; nom: string; type: TypeLieu } }>("/magasins", {
     schema: {
       body: {
         type: "object", required: ["parentId", "nom", "type"],
@@ -27,20 +47,7 @@ export function enregistrerMagasins(app: FastifyInstance, outils: Outils): void 
     const m = await protege(req, async (ctx) => {
       const b = req.body;
       await exigerSurEntite(ctx, "magasins.gerer", b.parentId);
-      const code = await prochainNumero(ctx.client, "MAG");
-      const { rows } = await ctx.client.query(
-        `insert into entites (organisation_id, parent_id, code, nom, type, domaine)
-         values ($1, $2, $3, $4, $5, (select domaine from entites where id = $2)) returning id, parent_id, code, nom, type, actif`,
-        [ctx.organisationId, b.parentId, code, b.nom, b.type],
-      );
-      for (const module of MODULES_DU_MAGASIN) {
-        await ctx.client.query(
-          "insert into modules_entite (organisation_id, entite_id, module, actif) values ($1, $2, $3, true)",
-          [ctx.organisationId, rows[0].id, module],
-        );
-      }
-      await publierEvenement(ctx.client, "magasin.cree", { id: rows[0].id });
-      return rows[0];
+      return creerMagasin(ctx.client, ctx.organisationId, b.parentId, b.nom, b.type);
     });
     return reponse.status(201).send(m);
   });

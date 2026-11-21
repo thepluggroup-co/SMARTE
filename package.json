@@ -11,6 +11,7 @@
     "demarrer": "tsx --env-file=.env src/index.ts",
     "migrer": "tsx --env-file=.env scripts/migrer.ts",
     "provisionner:sgc": "tsx --env-file=.env scripts/provisionner-sgc.ts",
+    "provisionner:glomari": "tsx --env-file=.env scripts/provisionnerglomari.ts",
     "verifier-types": "tsc --noEmit",
     "test": "vitest run"
   },

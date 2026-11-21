@@ -1,6 +1,7 @@
 import pg from "pg";
 import { dansOrganisation } from "./base.js";
 import { ROLE_SUPER, ROLES_INITIAUX } from "./catalogue.js";
+import { creerMagasin, type TypeLieu } from "./magasins.js";
 import { hacherMotDePasse } from "./securite.js";
 
 export interface EntiteModele {
@@ -89,5 +90,35 @@ export async function provisionnerOrganisation(
       [organisationId, u.rows[0].id, roleAdmin],
     );
     return { organisationId, adminId: u.rows[0].id, entites };
+  });
+}
+
+/** Lieux de départ de GLOMARI (fiche technique globale, lot 0). */
+export const LIEUX_GLOMARI: { nom: string; type: TypeLieu }[] = [
+  { nom: "GLOMARI Mall Douala", type: "point_de_vente" },
+  { nom: "Entrepôt GLOMARI Mall Douala", type: "entrepot" },
+  { nom: "Agence de Yaoundé", type: "point_de_vente" },
+];
+
+/** Relançable : un lieu déjà présent sous GLOMARI, même nom et même type, n'est pas recréé. */
+export async function provisionnerLieuxGlomari(
+  poolAdmin: pg.Pool, organisationId: string,
+): Promise<{ crees: string[]; existants: string[] }> {
+  return dansOrganisation(poolAdmin, organisationId, async (c) => {
+    // Le verrou sur GLOMARI empêche deux lancements simultanés de créer le même lieu deux fois.
+    const { rows: [g] } = await c.query("select id from entites where code = 'GLOMARI' for update");
+    if (!g) throw new Error("Entité GLOMARI introuvable dans cette organisation");
+    const crees: string[] = [];
+    const existants: string[] = [];
+    for (const l of LIEUX_GLOMARI) {
+      const { rows: [deja] } = await c.query(
+        "select 1 from entites where parent_id = $1 and type = $2 and lower(nom) = lower($3)",
+        [g.id, l.type, l.nom],
+      );
+      if (deja) { existants.push(l.nom); continue; }
+      await creerMagasin(c, organisationId, g.id, l.nom, l.type);
+      crees.push(l.nom);
+    }
+    return { crees, existants };
   });
 }
