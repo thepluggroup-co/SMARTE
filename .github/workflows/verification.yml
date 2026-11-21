@@ -1,0 +1,56 @@
+name: Vérification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Base jetable du contrôle : ces mots de passe ne protègent rien d'autre.
+      TEST_ADMIN_URL: postgres://erp_proprio:erp_proprio@localhost:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Pas de super utilisateur : la sécurité au niveau des lignes doit être réellement éprouvée.
+      - name: Rôle erp_proprio
+        run: psql "postgres://postgres:postgres@localhost:5432/postgres" -v ON_ERROR_STOP=1 -c "create role erp_proprio login password 'erp_proprio' createdb createrole"
+
+      - name: Dépendances
+        run: npm ci
+
+      - name: Types
+        run: npx tsc --noEmit
+
+      - name: Tests
+        run: npx vitest run
