@@ -333,6 +333,11 @@ const MESSAGES = {
   import_clients_invalide: "Rien n'a été importé : corrigez les lignes ci-dessous (nom vide, téléphone ou e-mail invalide, ou ni téléphone ni e-mail).",
   import_colonnes_clients: "La première ligne du fichier doit contenir la colonne Nom, et Téléphone ou E-mail.",
   import_clients_vide: "Le fichier ne contient aucun client.",
+  paiement_indisponible: "Le paiement en ligne est indisponible pour le moment. Réessayez plus tard ou choisissez le paiement à la livraison.",
+  paiement_impossible: "Cette commande ne peut plus être payée en ligne.",
+  avis_refuse: "Avis de paiement refusé.",
+  vente_deja_terminee: "Cette vente est déjà terminée.",
+  montant_facture_different: "La facture ne correspond pas au montant payé : la vente reste à terminer.",
 };
 const texteErreur = (e) => e instanceof TypeError ? "Pas de connexion. Réessayez quand internet revient." : MESSAGES[e.code] || "Une erreur est survenue. Réessayez.";
 

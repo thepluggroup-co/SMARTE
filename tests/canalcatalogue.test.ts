@@ -66,7 +66,7 @@ describe("canal en ligne : boutique et catalogue public", () => {
     const b = await boutique(env);
     expect((await b.api("POST", "/canal-config", { entiteId: b.o.entites.GTA, actif: true })).corps.erreur).toBe("module_inactif");
     expect((await b.api("POST", "/canal-config/lieux", { entiteId: b.G, lieuEntiteId: b.o.entites.GTA, nomPublic: "Ailleurs" })).corps.erreur).toBe("lieu_invalide");
-    expect((await b.api("GET", `/canal-config?entiteId=${b.G}`)).corps).toEqual({ actif: true, lieux: [{ entite_id: b.lieu, nom_public: "GLOMARI Mall Douala", actif: true }] });
+    expect((await b.api("GET", `/canal-config?entiteId=${b.G}`)).corps).toEqual({ actif: true, responsable: "Admin", lieux: [{ entite_id: b.lieu, nom_public: "GLOMARI Mall Douala", actif: true }] });
 
     const autre = await env.nouvelleOrganisation();
     expect((await env.api("GET", `/canal-config?entiteId=${b.G}`, autre.jeton)).statut).not.toBe(200);

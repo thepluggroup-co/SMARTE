@@ -26,6 +26,8 @@ export interface LigneSaisie {
   prixUnitaire?: number;
   remisePct?: number;
   tauxTaxe?: number;
+  /** HT exact de la ligne, posé par le code (vente en ligne déjà payée), jamais reçu d'une route. */
+  brutHt?: number;
 }
 
 /** Calcul en entiers pour éviter les erreurs d'arrondi : milliers d'unités, centièmes de pour cent, FCFA entiers. */
@@ -41,7 +43,7 @@ const tauxLibre = { type: "number", minimum: 0, maximum: 100, multipleOf: 0.001 
 const schemaLignes = {
   type: "array", minItems: 1, maxItems: 500,
   items: {
-    type: "object", required: ["quantite"],
+    type: "object", required: ["quantite"], additionalProperties: false,
     properties: {
       produitId: uuid, designation: texte(300),
       quantite: { type: "number", exclusiveMinimum: 0, maximum: 1_000_000_000 },
@@ -70,7 +72,7 @@ async function ecrireLignes(ctx: Contexte, documentId: string, lignes: LigneSais
     const designation = l.designation?.trim() || p?.nom;
     const clientDoc = l.produitId && l.prixUnitaire === undefined ? (await ctx.client.query("select tiers_id from documents_vente where id = $1", [documentId])).rows[0]?.tiers_id : null;
     const prix = l.prixUnitaire ?? (l.produitId ? await prixProduit(ctx.client, l.produitId, p.prix_vente, l.quantite, clientDoc) : undefined);
-    const tranches = l.produitId && l.prixUnitaire === undefined ? await brutTranches(ctx.client, l.produitId, p.prix_vente, l.quantite, clientDoc) : undefined;
+    const tranches = l.brutHt ?? (l.produitId && l.prixUnitaire === undefined ? await brutTranches(ctx.client, l.produitId, p.prix_vente, l.quantite, clientDoc) : undefined);
     if (!designation || prix === undefined) throw new ErreurApi(400, "ligne_incomplete");
     const taux = l.tauxTaxe ?? p?.taux_taxe ?? 0;
     const remise = l.remisePct ?? 0;
@@ -108,6 +110,77 @@ async function soldes(c: Client, factureId: string) {
   );
   const { ttc, regle, avoirs } = rows[0];
   return { ttc, regle, avoirs, reste: ttc - regle - avoirs };
+}
+
+export interface EnteteBrouillon {
+  entiteId: string; tiersId: string; date: string; echeance?: string; notes?: string; clientNiu?: string;
+  modeRemise?: string; adresseLivraison?: string; transporteur?: string; fraisLivraison?: number; tauxFrais?: number;
+}
+
+export async function creerBrouillon(
+  ctx: Contexte, type: string, b: EnteteBrouillon, lignes: LigneSaisie[], origineId: string | null = null, motif: string | null = null,
+): Promise<string> {
+  await lierTiers(ctx, b.tiersId, b.entiteId);
+  const { rows } = await ctx.client.query(
+    `insert into documents_vente (organisation_id, entite_id, type, tiers_id, date_document, date_echeance, notes, client_niu, cree_par, origine_id, motif,
+       mode_remise, adresse_livraison, transporteur, frais_livraison, taux_frais)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, coalesce($12, 'aucun'), $13, $14, $15, $16) returning id`,
+    [ctx.organisationId, b.entiteId, type, b.tiersId, b.date, b.echeance ?? null, b.notes ?? null, b.clientNiu ?? null, ctx.utilisateurId, origineId, motif,
+      b.modeRemise ?? null, b.adresseLivraison ?? null, b.transporteur ?? null, b.fraisLivraison ?? 0, b.tauxFrais ?? 0],
+  );
+  await ecrireLignes(ctx, rows[0].id, lignes);
+  return rows[0].id as string;
+}
+
+/** Le droit de vendre sur le lieu se vérifie pour l'utilisateur du contexte, connecté ou responsable d'une vente automatique. */
+export async function emettre(ctx: Contexte, exigerSurEntite: Outils["exigerSurEntite"], id: string, entrepotId?: string) {
+  const { rows: [d] } = await ctx.client.query(
+    `select d.*, e.code as entite_code, e.nom as entite_nom, e.raison_sociale, e.niu, e.rccm, e.adresse, t.nom as tiers_nom
+     from documents_vente d join entites e on e.id = d.entite_id join tiers t on t.id = d.tiers_id where d.id = $1`,
+    [id],
+  );
+  if (d.type !== "devis" && !d.niu) throw new ErreurApi(409, "identite_vendeur_incomplete");
+  if (d.type !== "devis" && !d.raison_sociale) throw new ErreurApi(409, "identite_vendeur_incomplete");
+  if (d.type === "facture") {
+    // Verrou par client : deux factures simultanées ne franchissent pas le plafond ensemble.
+    await ctx.client.query("select 1 from tiers where id = $1 for update", [d.tiers_id]);
+    const credit = await controleCredit(ctx.client, d.tiers_id, d.total_ttc);
+    if (credit?.depasse && !(await aPermissionSurEntite(ctx.client, ctx.utilisateurId, "facturation.administrer", d.entite_id))) {
+      throw new ErreurApi(409, "plafond_credit_depasse", credit);
+    }
+  }
+
+  if (d.type === "facture") {
+    const { rows: suivis } = await ctx.client.query(
+      `select l.produit_id, sum(l.quantite)::float as quantite from lignes_vente l join produits p on p.id = l.produit_id
+       where l.document_id = $1 and p.suivi_stock group by l.produit_id order by l.produit_id`,
+      [id],
+    );
+    if (suivis.length) {
+      // Par défaut, la vente confirmée sort automatiquement du stock du magasin qui facture.
+      const stockLocal = await ctx.client.query(
+        "select 1 from modules_entite where entite_id = $1 and module = 'achats_stocks' and actif", [d.entite_id],
+      );
+      const lieu = entrepotId ?? (stockLocal.rows[0] ? d.entite_id : null);
+      if (!lieu) throw new ErreurApi(400, "entrepot_obligatoire");
+      // Vendre donne le droit de sortir la marchandise vendue, sans donner la gestion du stock.
+      await exigerSurEntite(ctx, "facturation.gerer", lieu);
+      for (const s of suivis) {
+        await produitSuivi(ctx.client, s.produit_id);
+        await sortirDuStock(ctx, lieu, s.produit_id, s.quantite, "vente", null, id);
+      }
+    }
+  }
+
+  const numero = await prochainNumero(ctx.client, `${SERIES[d.type]}-${d.entite_code}-${d.date_document.slice(0, 4)}`);
+  const { rows } = await ctx.client.query(
+    `update documents_vente set statut = 'emis', numero = $2, emis_le = now(), client_nom = $3,
+       vendeur_nom = $4, vendeur_niu = $5, vendeur_rccm = $6, vendeur_adresse = $7
+     where id = $1 returning *`,
+    [id, numero, d.tiers_nom, d.raison_sociale ?? d.entite_nom, d.niu, d.rccm, d.adresse],
+  );
+  await publierEvenement(ctx.client, `${d.type}.emis`, { id, numero, ttc: d.total_ttc });
+  return rows[0];
 }
 
 export function enregistrerFacturation(app: FastifyInstance, outils: Outils, pool: pg.Pool, taches: TachePlanifiee[] = []): void {
@@ -277,75 +350,6 @@ export function enregistrerFacturation(app: FastifyInstance, outils: Outils, poo
     }),
   );
 
-  const creerBrouillon = async (
-    ctx: Contexte, type: string, b: {
-      entiteId: string; tiersId: string; date: string; echeance?: string; notes?: string; clientNiu?: string;
-      modeRemise?: string; adresseLivraison?: string; transporteur?: string; fraisLivraison?: number; tauxFrais?: number;
-    },
-    lignes: LigneSaisie[], origineId: string | null = null, motif: string | null = null,
-  ) => {
-    await lierTiers(ctx, b.tiersId, b.entiteId);
-    const { rows } = await ctx.client.query(
-      `insert into documents_vente (organisation_id, entite_id, type, tiers_id, date_document, date_echeance, notes, client_niu, cree_par, origine_id, motif,
-         mode_remise, adresse_livraison, transporteur, frais_livraison, taux_frais)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, coalesce($12, 'aucun'), $13, $14, $15, $16) returning id`,
-      [ctx.organisationId, b.entiteId, type, b.tiersId, b.date, b.echeance ?? null, b.notes ?? null, b.clientNiu ?? null, ctx.utilisateurId, origineId, motif,
-        b.modeRemise ?? null, b.adresseLivraison ?? null, b.transporteur ?? null, b.fraisLivraison ?? 0, b.tauxFrais ?? 0],
-    );
-    await ecrireLignes(ctx, rows[0].id, lignes);
-    return rows[0].id as string;
-  };
-
-  const emettre = async (ctx: Contexte, id: string, entrepotId?: string) => {
-    const { rows: [d] } = await ctx.client.query(
-      `select d.*, e.code as entite_code, e.nom as entite_nom, e.raison_sociale, e.niu, e.rccm, e.adresse, t.nom as tiers_nom
-       from documents_vente d join entites e on e.id = d.entite_id join tiers t on t.id = d.tiers_id where d.id = $1`,
-      [id],
-    );
-    if (d.type !== "devis" && !d.niu) throw new ErreurApi(409, "identite_vendeur_incomplete");
-    if (d.type !== "devis" && !d.raison_sociale) throw new ErreurApi(409, "identite_vendeur_incomplete");
-    if (d.type === "facture") {
-      // Verrou par client : deux factures simultanées ne franchissent pas le plafond ensemble.
-      await ctx.client.query("select 1 from tiers where id = $1 for update", [d.tiers_id]);
-      const credit = await controleCredit(ctx.client, d.tiers_id, d.total_ttc);
-      if (credit?.depasse && !(await aPermissionSurEntite(ctx.client, ctx.utilisateurId, "facturation.administrer", d.entite_id))) {
-        throw new ErreurApi(409, "plafond_credit_depasse", credit);
-      }
-    }
-
-    if (d.type === "facture") {
-      const { rows: suivis } = await ctx.client.query(
-        `select l.produit_id, sum(l.quantite)::float as quantite from lignes_vente l join produits p on p.id = l.produit_id
-         where l.document_id = $1 and p.suivi_stock group by l.produit_id order by l.produit_id`,
-        [id],
-      );
-      if (suivis.length) {
-        // Par défaut, la vente confirmée sort automatiquement du stock du magasin qui facture.
-        const stockLocal = await ctx.client.query(
-          "select 1 from modules_entite where entite_id = $1 and module = 'achats_stocks' and actif", [d.entite_id],
-        );
-        const lieu = entrepotId ?? (stockLocal.rows[0] ? d.entite_id : null);
-        if (!lieu) throw new ErreurApi(400, "entrepot_obligatoire");
-        // Vendre donne le droit de sortir la marchandise vendue, sans donner la gestion du stock.
-        await exigerSurEntite(ctx, "facturation.gerer", lieu);
-        for (const s of suivis) {
-          await produitSuivi(ctx.client, s.produit_id);
-          await sortirDuStock(ctx, lieu, s.produit_id, s.quantite, "vente", null, id);
-        }
-      }
-    }
-
-    const numero = await prochainNumero(ctx.client, `${SERIES[d.type]}-${d.entite_code}-${d.date_document.slice(0, 4)}`);
-    const { rows } = await ctx.client.query(
-      `update documents_vente set statut = 'emis', numero = $2, emis_le = now(), client_nom = $3,
-         vendeur_nom = $4, vendeur_niu = $5, vendeur_rccm = $6, vendeur_adresse = $7
-       where id = $1 returning *`,
-      [id, numero, d.tiers_nom, d.raison_sociale ?? d.entite_nom, d.niu, d.rccm, d.adresse],
-    );
-    await publierEvenement(ctx.client, `${d.type}.emis`, { id, numero, ttc: d.total_ttc });
-    return rows[0];
-  };
-
   app.post<{
     Body: {
       type: string; entiteId: string; tiersId: string; date: string; echeance?: string; notes?: string;
@@ -393,7 +397,7 @@ export function enregistrerFacturation(app: FastifyInstance, outils: Outils, poo
     protege(req, async (ctx) => {
       const d = await documentAutorise(ctx, req.params.id, "facturation.gerer", true);
       if (d.statut !== "brouillon") throw new ErreurApi(409, "document_emis");
-      return emettre(ctx, req.params.id, req.body?.entrepotId);
+      return emettre(ctx, exigerSurEntite, req.params.id, req.body?.entrepotId);
     }),
   );
 
@@ -477,7 +481,7 @@ export function enregistrerFacturation(app: FastifyInstance, outils: Outils, poo
       }, lignes, req.params.id, req.body.motif);
       const { rows: [b] } = await ctx.client.query("select total_ttc from documents_vente where id = $1", [id]);
       if (b.total_ttc > s.reste) throw new ErreurApi(409, "avoir_superieur_au_reste", { reste: s.reste });
-      const avoir = await emettre(ctx, id);
+      const avoir = await emettre(ctx, exigerSurEntite, id);
       if (req.body.retourStock) {
         // La marchandise revient là d'où elle est partie, jamais plus que ce qui a été vendu sur cette facture.
         for (const l of lignes.filter((x) => x.produitId)) {

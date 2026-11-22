@@ -25,6 +25,13 @@ curl -f https://<domaine>/sante
 
 La deuxième commande de provisionnement crée sous GLOMARI les lieux « GLOMARI Mall Douala », « Entrepôt GLOMARI Mall Douala » et « Agence de Yaoundé » ; relancée, elle ne recrée rien (en local : `npm run provisionner:glomari`). Vider ensuite `SGC_ADMIN_MOT_DE_PASSE` dans `.env`. Conserver `ERP_CLE_SECRETS` hors du serveur : sans elle, les données chiffrées sont perdues. Se connecter, changer le mot de passe et activer la double authentification depuis « Mon compte ».
 
+## Paiement en ligne (Marketplace)
+
+- Avant d'ouvrir le paiement Mobile Money : dans Trésorerie, régler les portefeuilles par défaut Orange Money et MTN MoMo de la branche GLOMARI ; ouvrir la boutique en ligne avec la personne qui sera responsable des ventes automatiques ; vérifier l'identité vendeur (raison sociale, NIU) de la branche.
+- Essai privé, données fictives seulement : `ERP_PAIEMENT_FACTICE_SECRET` (générer avec `openssl rand -hex 32`) active le prestataire factice. Ne jamais le définir avec de vraies données : quiconque connaît ce secret peut simuler un paiement.
+- Le prestataire réel se branche après le choix de la direction ; ses identifiants vont dans `.env`, jamais dans le dépôt.
+- Avant l'ouverture au public, relever `ERP_CANAL_COMMANDES_PAR_MINUTE` et `ERP_CANAL_PAIEMENTS_PAR_MINUTE` : le serveur de la Marketplace appelle l'ERP depuis une seule adresse.
+
 ## Sauvegardes
 
 ```cron

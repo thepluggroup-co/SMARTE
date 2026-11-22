@@ -48,6 +48,7 @@ import { enregistrerSocle } from "./socle.js";
 import { enregistrerFournisseurs } from "./fournisseurs.js";
 import { enregistrerMall } from "./mall.js";
 import { enregistrerCanalEnLigne, expirerCommandesWeb } from "./canalenligne.js";
+import { enregistrerPaiementEnLigne, type PrestatairePaiement } from "./paiementenligne.js";
 import { enregistrerPilotage } from "./pilotage.js";
 import { enregistrerRh } from "./rh.js";
 import { enregistrerTresorerie } from "./tresorerie.js";
@@ -102,6 +103,10 @@ export interface OptionsServeur {
   envoiWebhooks?: OptionsEnvoi;
   /** Vrai en production : les webhooks partent seuls. */
   webhooksAuto?: boolean;
+  /** Prestataires de paiement Mobile Money ; sans eux, le paiement en ligne est indisponible. */
+  prestatairesPaiement?: PrestatairePaiement[];
+  /** Commandes et lancements de paiement par minute et par adresse IP sur la Marketplace (20 et 10 par défaut). */
+  debitCanal?: { commandes?: number; paiements?: number };
 }
 
 export interface Outils {
@@ -805,7 +810,10 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
   enregistrerRapports(app, { protege, exigerSurEntite, exiger });
   enregistrerCommerce(app, pool, { protege, exigerSurEntite, exiger }, options.urlPublique);
   enregistrerMall(app, pool, { protege, exigerSurEntite, exiger }, options.urlPublique);
-  enregistrerCanalEnLigne(app, pool, { protege, exigerSurEntite, exiger }, taches, options.urlPublique);
+  enregistrerCanalEnLigne(app, pool, { protege, exigerSurEntite, exiger }, taches, options.urlPublique, options.debitCanal?.commandes ?? 20);
+  enregistrerPaiementEnLigne(app, pool, { protege, exigerSurEntite, exiger }, {
+    prestataires: options.prestatairesPaiement ?? [], urlPublique: options.urlPublique, paiementsParMinute: options.debitCanal?.paiements ?? 10,
+  });
   enregistrerRecouvrement(app, { protege, exigerSurEntite, exiger });
   enregistrerProspection(app, pool, { protege, exigerSurEntite, exiger });
   enregistrerSocle(app, { protege, exigerSurEntite, exiger });
