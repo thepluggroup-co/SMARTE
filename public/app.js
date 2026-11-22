@@ -330,6 +330,9 @@ const MESSAGES = {
   commande_non_modifiable: "Cette commande est déjà traitée.",
   confirmation_impossible: "Seule une commande payée à la livraison se confirme ici ; les autres attendent le paiement en ligne.",
   boutique_deja_active: "Une autre branche a déjà sa boutique en ligne ouverte.",
+  import_clients_invalide: "Rien n'a été importé : corrigez les lignes ci-dessous (nom vide, téléphone ou e-mail invalide, ou ni téléphone ni e-mail).",
+  import_colonnes_clients: "La première ligne du fichier doit contenir la colonne Nom, et Téléphone ou E-mail.",
+  import_clients_vide: "Le fichier ne contient aucun client.",
 };
 const texteErreur = (e) => e instanceof TypeError ? "Pas de connexion. Réessayez quand internet revient." : MESSAGES[e.code] || "Une erreur est survenue. Réessayez.";
 
