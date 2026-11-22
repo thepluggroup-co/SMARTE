@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
 import { provisionnerOrganisation, STRUCTURE_SGC } from "../src/provisionnement.js";
-import { creerServeur } from "../src/serveur.js";
+import { creerServeur, type OptionsServeur } from "../src/serveur.js";
 
 export const MOT_DE_PASSE = "un-mot-de-passe-solide";
 
@@ -11,10 +11,10 @@ export const OPTIONS = {
   connexionsParMinute: 100_000,
 };
 
-export async function environnement() {
+export async function environnement(options: Partial<OptionsServeur> = {}) {
   const poolApp = new pg.Pool({ connectionString: process.env.TEST_BASE_APP_URL });
   const poolAdmin = new pg.Pool({ connectionString: process.env.TEST_BASE_ADMIN_URL });
-  const app = await creerServeur(poolApp, OPTIONS);
+  const app = await creerServeur(poolApp, { ...OPTIONS, ...options });
 
   const api = async (methode: string, url: string, jeton?: string, corps?: object) => {
     const r = await app.inject({

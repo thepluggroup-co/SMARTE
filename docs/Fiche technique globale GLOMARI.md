@@ -324,7 +324,7 @@ Toutes ces routes sont limitées en débit, comme celles qui existent déjà. El
 
 | Appel | Sens | Mécanisme | Statut |
 | --- | --- | --- | --- |
-| Avis de paiement | Prestataire → SMARTE | `POST /paiements/avis/:prestataire`, signature vérifiée, idempotent | Lot 2 |
+| Avis de paiement | Prestataire → SMARTE | `POST /paiements/avis/:prestataire/:org` (l'organisation dans l'adresse ouvre son cloisonnement), signature vérifiée, idempotent | Lot 2 |
 | Webhooks | SMARTE → serveur Next.js | Clés et webhooks signés existants ; événements ci-dessous | Existant (événements nouveaux aux lots 1 à 4) |
 | Messages | SMARTE → prestataire SMS ou WhatsApp | Interface `EnvoiMessage` | Lot 4 |
 | IA | SMARTE → fournisseur IA | Interface `GenerateurIa` existante | Existant, étendu au lot 4 |
@@ -453,11 +453,11 @@ Recette : une commande en ligne réserve le stock du Mall et apparaît dans l'ER
 ```text
 PROMPT ERP LOT 2
 Prérequis : prestataire de paiement choisi ; identifiants dans .env, jamais dans le code.
-1. src/paiement_en_ligne.ts : interface interchangeable sur le modèle de GenerateurIa (src/studio.ts) :
+1. src/paiementenligne.ts : interface interchangeable sur le modèle de GenerateurIa (src/studio.ts) :
    PrestatairePaiement { initier(commande) ; verifierAvis(entetes, corps) }. Implémentation factice pour les tests,
    implémentation réelle pour le prestataire choisi.
 2. POST /marketplace/:org/commandes/:reference/payer : lance le paiement (Orange Money ou MTN MoMo).
-3. POST /paiements/avis/:prestataire : signature vérifiée ; avis non signé refusé ; idempotent par référence du
+3. POST /paiements/avis/:prestataire/:org : signature vérifiée ; avis non signé refusé ; idempotent par référence du
    prestataire (contrainte d'unicité) ; montant différent refusé. Si payé, dans une seule transaction :
    encaissement dans le portefeuille par défaut du moyen (portefeuilles_defaut), facture émise (sortie de stock
    automatique existante), commande « payee » puis « facturee », colis créé.

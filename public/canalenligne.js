@@ -1,11 +1,12 @@
 "use strict";
 /* Commandes en ligne de la Marketplace GLOMARI. Le serveur calcule et contrôle tout : l'écran affiche et transmet. */
 
-const STATUTS_WEB = { reservee: "Réservée", payee: "Payée", facturee: "Facturée", expediee: "Expédiée", livree: "Livrée", annulee: "Annulée", expiree: "Expirée" };
+const STATUTS_WEB = { reservee: "Réservée", payee: "Payée, vente à terminer", facturee: "Facturée", expediee: "Expédiée", livree: "Livrée", annulee: "Annulée", expiree: "Expirée", a_rembourser: "À rembourser" };
+const PAIEMENTS_WEB = { lance: "Lancé", reussi: "Réussi", echoue: "Échoué", a_rembourser: "À rembourser" };
 const MOYENS_WEB = { orange_money: "Orange Money", mtn_momo: "MTN MoMo", a_la_livraison: "À la livraison" };
 const MODES_WEB = { domicile: "Domicile", agence_voyage: "Agence de voyage", point_relais: "Point relais", retrait_magasin: "Retrait au magasin" };
 const enAttenteWeb = (c) => c.statut === "reservee" && !c.colis_id;
-const pastilleWeb = (c) => ["annulee", "expiree"].includes(c.statut) ? "pastille retard" : enAttenteWeb(c) ? "pastille attente" : "pastille ok";
+const pastilleWeb = (c) => ["annulee", "expiree", "a_rembourser"].includes(c.statut) ? "pastille retard" : enAttenteWeb(c) || c.statut === "payee" ? "pastille attente" : "pastille ok";
 const dateHeureFr = (d) => new Date(d).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 
 async function ecranCommandesEnLigne(message, filtre = "") {
@@ -15,6 +16,7 @@ async function ecranCommandesEnLigne(message, filtre = "") {
     h("div", { class: "actions" },
       h("label", {}, "Statut ", h("select", { onchange: (e) => ecranCommandesEnLigne(null, e.target.value) }, h("option", { value: "" }, "Tous"),
         Object.entries(STATUTS_WEB).map(([code, libelle]) => h("option", { value: code, selected: code === filtre }, libelle)))),
+      droits.includes("tresorerie.voir") || droits.includes("facturation.voir") ? h("button", { class: "discret", onclick: () => ecranPaiementsEnLigne() }, "Paiements en ligne") : null,
       droits.includes("facturation.administrer") ? h("button", { class: "discret", onclick: () => ecranBoutiqueEnLigne() }, "Réglages de la boutique") : null),
     h("div", { class: "carte" }, commandes.length ? commandes.map((c) => carteCommandeWeb(c, gere, filtre)) : h("p", { class: "discret-texte" }, "Aucune commande.")));
 }
@@ -35,6 +37,15 @@ function carteCommandeWeb(c, gere, filtre) {
       d.note ? h("p", {}, d.note) : null,
       d.motif ? h("p", { class: "discret-texte" }, `Motif : ${d.motif}`) : null,
       d.colis ? h("p", {}, `Colis ${d.colis.numero} (${d.colis.statut}), à encaisser : ${fcfa(d.colis.a_encaisser)}`) : null,
+      d.facture ? h("p", {}, `Facture ${d.facture}`) : null,
+      (d.paiements || []).length ? h("ul", { class: "discret-texte" }, d.paiements.map((x) => h("li", {},
+        `${MOYENS_WEB[x.moyen]} ${x.reference_prestataire} : ${fcfa(x.montant)}, ${PAIEMENTS_WEB[x.statut]}${x.traite_le ? ` le ${dateHeureFr(x.traite_le)}` : ""}`))) : null,
+      gere && d.statut === "payee" ? h("div", { class: "actions" }, h("button", {
+        onclick: async () => {
+          const r = await api("POST", `/commandes-web/${c.id}/terminer`);
+          ecranCommandesEnLigne(`Vente terminée : facture ${r.facture}.`, filtre);
+        },
+      }, "Terminer la vente")) : null,
       gere && d.statut === "reservee" ? h("div", { class: "actions" },
         d.moyen_paiement === "a_la_livraison" && !d.colis ? h("button", {
           onclick: async () => {
@@ -52,6 +63,24 @@ function carteCommandeWeb(c, gere, filtre) {
       h("span", { class: pastilleWeb(c) }, c.colis_id && c.statut === "reservee" ? "Confirmée" : STATUTS_WEB[c.statut]),
       enAttenteWeb(c) ? h("span", { class: "discret-texte" }, ` jusqu'au ${dateHeureFr(c.expire_le)}`) : null),
     detail);
+}
+
+/** Rapprochement : ce que l'opérateur a versé ce jour-là, par moyen, avec facture et portefeuille. */
+async function ecranPaiementsEnLigne(message, jour = aujourdhui(), moyen = "") {
+  const r = await api("GET", `/paiements-en-ligne?jour=${jour}${moyen ? `&moyen=${moyen}` : ""}`);
+  const rembourser = r.paiements.filter((x) => x.statut === "a_rembourser");
+  vue(h("h1", {}, "Paiements en ligne"), message ? h("div", { class: "succes", role: "status" }, message) : null,
+    h("div", { class: "actions" },
+      h("label", {}, "Jour ", h("input", { type: "date", value: jour, onchange: (e) => ecranPaiementsEnLigne(null, e.target.value, moyen) })),
+      h("label", {}, "Moyen ", h("select", { onchange: (e) => ecranPaiementsEnLigne(null, jour, e.target.value) }, h("option", { value: "" }, "Tous"),
+        Object.entries(MOYENS_WEB).filter(([code]) => code !== "a_la_livraison").map(([code, libelle]) => h("option", { value: code, selected: code === moyen }, libelle)))),
+      h("button", { class: "discret", onclick: () => ecranCommandesEnLigne() }, "Retour aux commandes")),
+    h("div", { class: "chiffres" }, h("div", { class: "chiffre" }, h("b", {}, String(r.nombre)), h("span", {}, "paiements versés")), h("div", { class: "chiffre" }, h("b", {}, fcfa(r.total)), h("span", {}, "total"))),
+    h("div", { class: "carte" }, r.paiements.length ? r.paiements.map((x) => h("div", { class: "apprenant" },
+      h("div", { class: "ligne" }, h("span", { class: "nom" }, `${x.commande} : ${fcfa(x.montant)}`), h("span", { class: x.statut === "reussi" ? "pastille ok" : x.statut === "a_rembourser" ? "pastille retard" : "pastille attente" }, PAIEMENTS_WEB[x.statut])),
+      h("div", { class: "discret-texte" }, [MOYENS_WEB[x.moyen], x.reference_prestataire, x.facture && `facture ${x.facture}`, x.en_attente ? "en attente d'affectation en trésorerie" : x.portefeuille].filter(Boolean).join(" · "))))
+      : h("p", { class: "discret-texte" }, "Aucun paiement ce jour-là.")),
+    rembourser.length ? h("p", { class: "discret-texte" }, `${rembourser.length} paiement(s) à rembourser : une tâche a été confiée au trésorier pour chacun.`) : null);
 }
 
 async function ecranBoutiqueEnLigne(message) {

@@ -33,7 +33,7 @@ const uuid = { type: "string", format: "uuid" } as const;
 const paramId = { type: "object", required: ["id"], properties: { id: uuid } } as const;
 const parMinute = (max: number) => ({ rateLimit: { max, timeWindow: "1 minute" } });
 
-async function leverReservations(c: Client, commandeId: string): Promise<void> {
+export async function leverReservations(c: Client, commandeId: string): Promise<void> {
   await c.query("update reservations_stock set levee_le = now() where commande_web_id = $1 and levee_le is null", [commandeId]);
 }
 
@@ -56,7 +56,7 @@ interface CorpsCommande {
   modeLivraison: string; zoneId?: string; pointRelaisId?: string; adresse?: string; moyenPaiement: string; note?: string;
 }
 
-export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, outils: Outils, taches: TachePlanifiee[], urlPublique: string): void {
+export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, outils: Outils, taches: TachePlanifiee[], urlPublique: string, commandesParMinute = 20): void {
   const { protege, exiger, exigerSurEntite } = outils;
   taches.push((organisationId) => dansOrganisation(pool, organisationId, async (c) => { await expirerCommandesWeb(c); }));
   const lienColis = (org: string, code: string) => `${urlPublique}/suivi.html?c=${org}.${code}`;
@@ -84,10 +84,12 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
   }, async (req) =>
     protege(req, async (ctx) => {
       await exigerSurEntite(ctx, "facturation.voir", req.query.entiteId);
-      const { rows: [k] } = await ctx.client.query("select id, actif from config_canal where entite_id = $1", [req.query.entiteId]);
-      if (!k) return { actif: false, lieux: [] };
+      const { rows: [k] } = await ctx.client.query(
+        "select k.id, k.actif, u.nom as responsable from config_canal k left join utilisateurs u on u.id = k.responsable_id where k.entite_id = $1", [req.query.entiteId],
+      );
+      if (!k) return { actif: false, lieux: [], responsable: null };
       const { rows: lieux } = await ctx.client.query("select entite_id, nom_public, actif from lieux_canal where config_id = $1 order by nom_public", [k.id]);
-      return { actif: k.actif, lieux };
+      return { actif: k.actif, lieux, responsable: k.responsable };
     }),
   );
 
@@ -97,7 +99,11 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
     protege(req, async (ctx) => {
       const id = await boutiqueDe(ctx, req.body.entiteId);
       try {
-        await ctx.client.query("update config_canal set actif = $2 where id = $1", [id, req.body.actif]);
+        // Celui qui ouvre la boutique devient le responsable au nom de qui les ventes payées en ligne sont créées.
+        await ctx.client.query(
+          "update config_canal set actif = $2, responsable_id = case when $2 then $3::uuid else responsable_id end where id = $1",
+          [id, req.body.actif, ctx.utilisateurId],
+        );
       } catch (e) {
         if ((e as { code?: string }).code === "23505") throw new ErreurApi(409, "boutique_deja_active");
         throw e;
@@ -249,7 +255,7 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
   };
 
   app.post<{ Params: { org: string }; Body: CorpsCommande }>("/marketplace/:org/commandes", {
-    config: parMinute(20),
+    config: parMinute(commandesParMinute),
     schema: {
       body: {
         type: "object", required: ["lieuId", "lignes", "nomClient", "telephone", "modeLivraison", "moyenPaiement"],
@@ -433,7 +439,18 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
          from lignes_commande_web l join produits p on p.id = l.produit_id where l.commande_id = $1 order by p.nom`,
         [w.id],
       );
-      return { ...w, lignes };
+      const { rows: paiements } = await ctx.client.query(
+        "select reference_prestataire, moyen, montant, statut, motif, lance_le, traite_le from paiements_en_ligne where commande_id = $1 order by lance_le",
+        [w.id],
+      );
+      const { rows: [plus] } = await ctx.client.query(
+        `select f.numero as facture, u.nom as responsable from commandes_web w
+         left join documents_vente f on f.id = w.facture_id
+         left join config_canal k on k.entite_id = w.entite_id left join utilisateurs u on u.id = k.responsable_id
+         where w.id = $1`,
+        [w.id],
+      );
+      return { ...w, ...plus, lignes, paiements };
     }),
   );
 

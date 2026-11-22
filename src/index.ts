@@ -1,4 +1,5 @@
 import pg from "pg";
+import { prestataireFactice } from "./paiementenligne.js";
 import { creerServeur } from "./serveur.js";
 import { generateurClaude } from "./studio.js";
 
@@ -20,6 +21,12 @@ const app = await creerServeur(pool, {
   generateurIa: process.env.ERP_IA_CLE && process.env.ERP_IA_MODELE
     ? generateurClaude(process.env.ERP_IA_CLE, process.env.ERP_IA_MODELE)
     : undefined,
+  // Essai privé seulement : tant que la direction n'a pas choisi le prestataire réel.
+  prestatairesPaiement: process.env.ERP_PAIEMENT_FACTICE_SECRET ? [prestataireFactice(process.env.ERP_PAIEMENT_FACTICE_SECRET)] : [],
+  debitCanal: {
+    commandes: process.env.ERP_CANAL_COMMANDES_PAR_MINUTE ? Number(process.env.ERP_CANAL_COMMANDES_PAR_MINUTE) : undefined,
+    paiements: process.env.ERP_CANAL_PAIEMENTS_PAR_MINUTE ? Number(process.env.ERP_CANAL_PAIEMENTS_PAR_MINUTE) : undefined,
+  },
 });
 
 // Une connexion inactive coupée par la base ne doit pas arrêter le serveur : le pool la remplace.
