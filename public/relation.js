@@ -73,7 +73,50 @@ async function ecranClients(message) {
         champ("Source", { name: "source" }),
         choix("entiteId", "Entité", entites)),
       ], "Créer l'opportunité")) : null,
+    carteImportClients(tous, b),
   );
+}
+
+const COLONNES_IMPORT_CLIENTS = [["nom", "Nom"], ["telephone", "Téléphone"], ["email", "E-mail"], ["ville", "Ville"], ["source", "Source"]];
+
+/** La première ligne porte les titres ; une ligne vide est sautée, le numéro de ligne du fichier est gardé pour le rapport. */
+function lignesImportClients(rangs) {
+  const tete = (rangs[0] || []).map(sansAccent);
+  const position = Object.fromEntries(COLONNES_IMPORT_CLIENTS.map(([cle, titre]) => [cle, tete.indexOf(sansAccent(titre))]));
+  if (position.nom < 0 || (position.telephone < 0 && position.email < 0)) throw Object.assign(new Error(), { code: "import_colonnes_clients" });
+  const texte = (r, cle) => (position[cle] < 0 ? "" : String(r[position[cle]] ?? "").trim());
+  return rangs.slice(1).map((r, i) => ({ r, ligne: i + 2 }))
+    .filter(({ r }) => texte(r, "nom") || texte(r, "telephone") || texte(r, "email"))
+    .map(({ r, ligne }) => ({
+      ligne, nom: texte(r, "nom"), telephone: texte(r, "telephone") || undefined, email: texte(r, "email") || undefined,
+      ville: texte(r, "ville") || undefined, source: texte(r, "source") || undefined,
+    }));
+}
+
+function carteImportClients(entites, brancheChoisie) {
+  if (!droits.includes("tiers.creer")) return null;
+  const branches = entites.filter((e) => e.type === "branche").map((e) => [e.id, e.nom]);
+  if (!branches.length) return null;
+  return h("details", { class: "carte" }, h("summary", {}, "Importer des clients (Excel ou CSV)"),
+    h("p", { class: "discret-texte" }, "Colonnes : Nom (obligatoire), Téléphone, E-mail, Ville, Source ; au moins le téléphone ou l'e-mail. Un client déjà connu dans la branche n'est ni recréé ni modifié : relancer le même fichier ne crée rien."),
+    h("div", { class: "actions" }, h("button", {
+      type: "button", class: "discret",
+      onclick: () => fichierExcel("Modele import clients", "Clients", [COLONNES_IMPORT_CLIENTS.map(([, t]) => t), ["Awa Ndongo", "699 00 00 01", "awa@exemple.cm", "Douala", "Salon"]]),
+    }, "Télécharger le modèle")),
+    formulaire(async (v, f, zone) => {
+      const lignes = lignesImportClients(await lireTableur(f.querySelector("input[type=file]").files[0]));
+      if (!lignes.length) throw Object.assign(new Error(), { code: "import_clients_vide" });
+      try {
+        const r = await api("POST", "/tiers/import", { entiteId: v.entiteId, lignes });
+        const lignesDoublons = r.nb_doublons ? ` (lignes ${r.doublons.map((d) => d.ligne).join(", ")}${r.nb_doublons > r.doublons.length ? "…" : ""})` : "";
+        ecranClients(`${r.crees} client(s) créé(s), ${r.deja_presents} déjà présent(s), ${r.nb_doublons} doublon(s) dans le fichier${lignesDoublons}.`);
+      } catch (e) {
+        if (e.code !== "import_clients_invalide") throw e;
+        zone.replaceChildren(h("div", { class: "erreur", role: "alert" }, texteErreur(e),
+          h("ul", {}, e.details.erreurs.map((x) => h("li", {}, `Ligne ${x.ligne} : ${x.motif}`))),
+          e.details.total > e.details.erreurs.length ? h("p", {}, `Et ${e.details.total - e.details.erreurs.length} autre(s).`) : null));
+      }
+    }, [h("div", { class: "grille" }, h("label", {}, "Fichier", h("input", { type: "file", accept: ".xlsx,.csv", required: true })), choix("entiteId", "Branche", branches, brancheChoisie))], "Importer"));
 }
 
 async function chronologie(tiersId) {

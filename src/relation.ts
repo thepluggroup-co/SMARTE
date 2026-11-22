@@ -120,8 +120,9 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
       if (garde.fusionne_vers || doublon.fusionne_vers) throw new ErreurApi(409, "deja_fusionne");
       if (garde.branche_id && doublon.branche_id && garde.branche_id !== doublon.branche_id) throw new ErreurApi(409, "tiers_autre_branche");
       await ctx.client.query(
-        `update tiers set email = coalesce(email, $2), telephone = coalesce(telephone, $3), roles = (select array(select distinct unnest(roles || $4::text[]))), branche_id = coalesce(branche_id, $5) where id = $1`,
-        [garde.id, doublon.email, doublon.telephone, doublon.roles, doublon.branche_id],
+        `update tiers set email = coalesce(email, $2), telephone = coalesce(telephone, $3), roles = (select array(select distinct unnest(roles || $4::text[]))), branche_id = coalesce(branche_id, $5),
+           ville = coalesce(ville, $6), source = coalesce(source, $7) where id = $1`,
+        [garde.id, doublon.email, doublon.telephone, doublon.roles, doublon.branche_id, doublon.ville, doublon.source],
       );
       await ctx.client.query("update tiers set fusionne_vers = $2, archive = true, email = null, telephone = null where id = $1", [doublon.id, garde.id]);
       let table = "";
@@ -136,6 +137,86 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
       }
       await ctx.client.query("select journal_evenement('tiers.fusion', $1)", [JSON.stringify({ garde: garde.id, doublon: doublon.id })]);
       return { fusion: true };
+    }),
+  );
+
+  /**
+   * Import d'un fichier de clients dans une branche. Une erreur de format refuse tout le fichier ; un client déjà connu
+   * dans la branche (par téléphone, sinon par e-mail) ou répété dans le fichier n'est ni recréé ni modifié.
+   * Relancer le même fichier ne crée donc rien. Une fiche d'une autre branche n'est jamais reprise.
+   */
+  type LigneClient = { nom: string; telephone?: string; email?: string; ville?: string; source?: string; ligne?: number };
+  const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  app.post<{ Body: { entiteId: string; lignes: LigneClient[] } }>("/tiers/import", {
+    bodyLimit: 10 * 1024 ** 2,
+    schema: {
+      body: {
+        type: "object", required: ["entiteId", "lignes"],
+        properties: {
+          entiteId: uuid,
+          lignes: {
+            type: "array", minItems: 1, maxItems: 20000,
+            items: {
+              type: "object", required: ["nom"],
+              properties: {
+                nom: { type: "string", maxLength: 200 }, telephone: { type: "string", maxLength: 30 }, email: { type: "string", maxLength: 320 },
+                ville: { type: "string", maxLength: 100 }, source: { type: "string", maxLength: 100 }, ligne: { type: "integer", minimum: 1 },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (req) =>
+    protege(req, async (ctx) => {
+      const { rows: [e] } = await ctx.client.query("select entite_branche($1) as branche", [req.body.entiteId]);
+      if (!e?.branche) throw new ErreurApi(404, "introuvable");
+      const branche: string = e.branche;
+      await exigerSurEntite(ctx, "tiers.creer", branche);
+
+      const erreurs: { ligne: number; motif: string }[] = [];
+      const lignes = req.body.lignes.map((l, i) => {
+        const ligne = l.ligne ?? i + 2;
+        const nom = l.nom.trim();
+        const telephone = l.telephone?.trim() ? normaliserTelephone(l.telephone) : null;
+        const email = l.email?.trim().toLowerCase() || null;
+        if (!nom) erreurs.push({ ligne, motif: "Nom vide" });
+        if (telephone !== null && !/^[0-9]{8,15}$/.test(telephone)) erreurs.push({ ligne, motif: "Téléphone invalide" });
+        if (email !== null && !EMAIL.test(email)) erreurs.push({ ligne, motif: "E-mail invalide" });
+        if (telephone === null && email === null) erreurs.push({ ligne, motif: "Ni téléphone ni e-mail" });
+        return { ligne, nom, telephone, email, ville: l.ville?.trim() || null, source: l.source?.trim() || null };
+      });
+      if (erreurs.length) throw new ErreurApi(400, "import_clients_invalide", { erreurs: erreurs.slice(0, 100), total: erreurs.length });
+
+      // Deux imports simultanés dans la même branche ne créent pas deux fois la même fiche.
+      await ctx.client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`tiers-import:${branche}`]);
+      const { rows: connus } = await ctx.client.query("select telephone, email from tiers where branche_id = $1 and not archive", [branche]);
+      const telephones = new Set<string>(connus.map((x) => x.telephone).filter(Boolean));
+      const emails = new Set<string>(connus.map((x) => x.email).filter(Boolean));
+      const vusTelephones = new Set<string>();
+      const vusEmails = new Set<string>();
+      const aCreer: typeof lignes = [];
+      const doublons: { ligne: number; nom: string }[] = [];
+      let dejaPresents = 0;
+      for (const l of lignes) {
+        if (l.telephone ? vusTelephones.has(l.telephone) : vusEmails.has(l.email!)) { doublons.push({ ligne: l.ligne, nom: l.nom }); continue; }
+        if (l.telephone) vusTelephones.add(l.telephone);
+        if (l.email) vusEmails.add(l.email);
+        if (l.telephone ? telephones.has(l.telephone) : emails.has(l.email!)) { dejaPresents += 1; continue; }
+        aCreer.push(l);
+      }
+      if (aCreer.length) {
+        await ctx.client.query(
+          `insert into tiers (organisation_id, type, nom, telephone, email, ville, source, roles, entite_origine_id, branche_id)
+           select $1, 'personne', x.nom, x.telephone, x.email, x.ville, x.source, '{client}', $2, $2
+           from unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[]) as x(nom, telephone, email, ville, source)`,
+          [ctx.organisationId, branche, aCreer.map((l) => l.nom), aCreer.map((l) => l.telephone), aCreer.map((l) => l.email), aCreer.map((l) => l.ville), aCreer.map((l) => l.source)],
+        );
+      }
+      // Un seul événement pour tout le fichier : un par fiche déclencherait des milliers d'automatismes d'un coup.
+      await publierEvenement(ctx.client, "tiers.importes", { branche, crees: aCreer.length });
+      await ctx.client.query("select journal_evenement('tiers.import', $1)", [JSON.stringify({ branche, crees: aCreer.length, deja_presents: dejaPresents, doublons: doublons.length })]);
+      return { crees: aCreer.length, deja_presents: dejaPresents, nb_doublons: doublons.length, doublons: doublons.slice(0, 100) };
     }),
   );
 
