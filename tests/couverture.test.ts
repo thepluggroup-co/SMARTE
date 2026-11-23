@@ -135,7 +135,8 @@ describe("couverture de stock", () => {
 
     const gta = await o.compte("comptabilite", o.entites.GTA);
     expect((await o.couverture(gta.jeton)).statut).toBe(403);
-    expect((await o.api("GET", `/stocks/couverture?brancheId=${o.entites.GTA}`, undefined, gta.jeton)).corps.categories).toEqual([]);
+    // GTA n'a pas le module de stock : ses collaborateurs n'y ont aucun droit de stock.
+    expect((await o.api("GET", `/stocks/couverture?brancheId=${o.entites.GTA}`, undefined, gta.jeton)).statut).toBe(403);
     const ailleurs = await env.nouvelleOrganisation();
     expect((await env.api("GET", `/stocks/couverture?brancheId=${o.G}`, ailleurs.jeton)).statut).toBe(403);
   });

@@ -80,6 +80,8 @@ describe("dépôt-vente", () => {
   it("établit le relevé une seule fois et facture le fournisseur en brouillon (Q12)", async () => {
     const o = await depotVente();
     await o.declarer(o.savon, { mode: "prix_fixe", prixReversement: 3000 });
+    // Le dépôt date de dix jours : une vente hors connexion d'il y a trois jours a donc une rémunération.
+    await o.sql("update remunerations_depot set depuis_le = depuis_le - interval '10 days' where organisation_id = org_courante() and produit_id = $1", [o.savon]);
     await o.entrer(o.savon, 200);
     expect((await o.releve()).corps.erreur).toBe("releve_vide");
     await o.vendre(o.savon, 30, 150_000);
@@ -169,7 +171,8 @@ describe("dépôt-vente", () => {
     const gta = await o.compte("comptabilite", o.entites.GTA);
     const comptableGta = await o.compte("comptable", o.entites.GTA);
     expect((await o.api("GET", `/depots-vente?brancheId=${o.G}`, undefined, gta.jeton)).statut).toBe(403);
-    expect((await o.api("GET", `/depots-vente?brancheId=${o.entites.GTA}`, undefined, gta.jeton)).corps).toEqual([]);
+    // GTA n'a pas le module de stock : ses collaborateurs n'y ont aucun droit de stock ni d'achat.
+    expect((await o.api("GET", `/depots-vente?brancheId=${o.entites.GTA}`, undefined, gta.jeton)).statut).toBe(403);
     expect((await o.apercu(aujourdhui(), aujourdhui(), o.local, comptableGta.jeton)).statut).toBe(403);
     expect((await o.api("GET", `/depots-vente/releves?brancheId=${o.G}`, undefined, comptableGta.jeton)).statut).toBe(403);
     expect((await o.declarer(o.savon, { mode: "prix_fixe", prixReversement: 1 }, o.local, gta.jeton)).statut).toBe(403);
