@@ -174,3 +174,5 @@ begin
 end $$;
 grant select, insert, update on acomptes_fournisseur, articles_depot, alertes_couverture to erp_app;
 grant select, insert on remunerations_depot, releves_depot, lignes_releve_depot to erp_app;
+-- La fusion de deux fiches reporte le fournisseur d'un relevé ; rien d'autre n'y change.
+grant update (fournisseur_id) on releves_depot to erp_app;
