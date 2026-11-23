@@ -65,6 +65,9 @@ async function pieces(c: Client, brancheId: string, fin: string, p: Record<strin
   const res: Proposition[] = [];
   const pas = (type: string, col: string) => `not exists (select 1 from ecritures e where e.source_type = '${type}' and e.source_id = ${col})`;
   const compteMoyen = (m: string) => p[m] ?? p.attente!;
+  // Une branche initialisée avant les précommandes n'a pas encore ces deux réglages.
+  const avances = p.avances_clients ?? PARAMETRES_DE_DEPART.avances_clients!;
+  const produitsDivers = p.produits_divers ?? PARAMETRES_DE_DEPART.produits_divers!;
   const ajout = (x: Proposition) => res.push(x);
 
   const docs = await c.query(
@@ -91,16 +94,19 @@ async function pieces(c: Client, brancheId: string, fin: string, p: Record<strin
   for (const annule of [false, true]) {
     const type = annule ? "reglement_annule" : "reglement";
     const { rows } = await c.query(
-      `select r.id, r.montant, r.moyen, r.numero_recu, d.tiers_id, e.nom as section, ((${annule ? "r.annule_le" : "r.encaisse_le"}) at time zone 'Africa/Douala')::date::text as date
+      `select r.id, r.montant, r.moyen, r.numero_recu, r.acompte_id, d.tiers_id, e.nom as section, ((${annule ? "r.annule_le" : "r.encaisse_le"}) at time zone 'Africa/Douala')::date::text as date
        from reglements r join documents_vente d on d.id = r.facture_id join entites e on e.id = d.entite_id
        where entite_branche(d.entite_id) = $1 ${annule ? "and r.annule_le is not null" : ""} and ((${annule ? "r.annule_le" : "r.encaisse_le"}) at time zone 'Africa/Douala')::date <= $2 and ${pas(type, "r.id")} limit 2000`,
       [brancheId, fin],
     );
     for (const r of rows) {
       const s = annule ? -1 : 1;
+      // L'acompte d'une précommande imputé sur sa facture solde l'avance du client, sans argent reçu ce jour-là.
+      const imputation = Boolean(r.acompte_id);
       ajout({
-        sourceType: type, sourceId: r.id, journal: r.moyen === "especes" ? "CA" : "BQ", date: r.date, libelle: `${annule ? "Annulation du r" : "R"}èglement ${r.numero_recu}`, piece: r.numero_recu,
-        lignes: [...ligne(compteMoyen(r.moyen), s * r.montant, null, r.section), ...ligne(p.clients!, -s * r.montant, r.tiers_id, r.section)],
+        sourceType: type, sourceId: r.id, journal: imputation ? "OD" : r.moyen === "especes" ? "CA" : "BQ", date: r.date,
+        libelle: `${annule ? "Annulation du r" : "R"}èglement ${r.numero_recu}${imputation ? " (acompte imputé)" : ""}`, piece: r.numero_recu,
+        lignes: [...ligne(imputation ? avances : compteMoyen(r.moyen), s * r.montant, imputation ? r.tiers_id : null, r.section), ...ligne(p.clients!, -s * r.montant, r.tiers_id, r.section)],
       });
     }
     const type2 = annule ? "paiement_annule" : "paiement";
@@ -283,6 +289,41 @@ async function pieces(c: Client, brancheId: string, fin: string, p: Record<strin
         lignes: [...ligne("651", m, null, null), ...ligne(p.clients!, -m, x.tiers_id, null), ...(provision > 0 ? [...ligne("491", provision, null, null), ...ligne("759", -provision, null, null)] : [])],
       });
     }
+  }
+
+  // Paiements en ligne encaissés sans facture (acompte de précommande, paiement en trop) et leurs remboursements :
+  // c'est une avance du client, à valider par l'expert-comptable.
+  for (const sortie of [false, true]) {
+    const type = sortie ? "remboursement_en_ligne" : "encaissement_en_ligne";
+    const { rows } = await c.query(
+      `select m.id, m.montant, m.reference, x.type as portefeuille, (m.cree_le at time zone 'Africa/Douala')::date::text as date, coalesce(w.tiers_id, i.tiers_id) as tiers_id
+       from mouvements_portefeuille m join portefeuilles x on x.id = m.portefeuille_id
+       join paiements_en_ligne pl on pl.id = m.source_id
+       left join commandes_web w on w.id = pl.commande_id left join inscriptions_precommande i on i.id = pl.inscription_id
+       where entite_branche(x.entite_id) = $1 and m.source_type = $2 and m.type = $3 and (m.cree_le at time zone 'Africa/Douala')::date <= $4 and ${pas(type, "m.id")}
+       order by m.cree_le limit 2000`,
+      [brancheId, sortie ? "remboursement_en_ligne" : "paiement_en_ligne", sortie ? "sortie" : "encaissement", fin],
+    );
+    for (const m of rows) {
+      ajout({
+        sourceType: type, sourceId: m.id, journal: m.portefeuille === "especes" ? "CA" : "BQ", date: m.date,
+        libelle: `${sortie ? "Remboursement d'un paiement en ligne" : "Paiement en ligne sans facture"} ${m.reference ?? ""}`.trim().slice(0, 300), piece: m.reference,
+        lignes: [...ligne(compteMoyen(m.portefeuille), m.montant, null, null), ...ligne(avances, -m.montant, m.tiers_id, null)],
+      });
+    }
+  }
+  // Solde non payé à temps : l'acompte reste acquis à GLOMARI (choix de la direction du 22 novembre 2026).
+  const { rows: conserves } = await c.query(
+    `select i.id, i.reference, i.acompte, i.tiers_id, (i.traite_le at time zone 'Africa/Douala')::date::text as date
+     from inscriptions_precommande i join campagnes_arrivage k on k.id = i.campagne_id
+     where i.statut = 'acompte_conserve' and entite_branche(k.entite_id) = $1 and (i.traite_le at time zone 'Africa/Douala')::date <= $2 and ${pas("acompte_conserve", "i.id")} limit 2000`,
+    [brancheId, fin],
+  );
+  for (const i of conserves) {
+    ajout({
+      sourceType: "acompte_conserve", sourceId: i.id, journal: "OD", date: i.date, libelle: `Acompte conservé, précommande ${i.reference}`, piece: i.reference,
+      lignes: [...ligne(avances, i.acompte, i.tiers_id, null), ...ligne(produitsDivers, -i.acompte, null, null)],
+    });
   }
 
   // Les mouvements saisis dans la trésorerie. Une dépense passe par un compte d'attente, que le comptable impute.

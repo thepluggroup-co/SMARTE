@@ -125,7 +125,8 @@ export function enregistrerRapports(app: FastifyInstance, outils: Outils): void 
            union all
            select x.moyen, -x.montant from remboursements_comptoir x join retours_comptoir t on t.id = x.retour_id where x.moyen <> 'credit' and t.entite_id = any($1::uuid[]) and ${JOUR("t.cree_le")} between $2 and $3
            union all
-           select r.moyen, r.montant from reglements r join documents_vente d on d.id = r.facture_id where r.annule_le is null and d.entite_id = any($4::uuid[]) and ${JOUR("r.encaisse_le")} between $2 and $3
+           -- Un acompte de précommande imputé sur sa facture a été encaissé au jour de l'acompte, pas ce jour-là.
+           select r.moyen, r.montant from reglements r join documents_vente d on d.id = r.facture_id where r.annule_le is null and r.acompte_id is null and d.entite_id = any($4::uuid[]) and ${JOUR("r.encaisse_le")} between $2 and $3
          ) x group by x.moyen order by montant desc`, [ventes, du, au, clients],
       );
 

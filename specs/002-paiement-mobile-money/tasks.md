@@ -106,9 +106,9 @@ description: "Liste des tâches du paiement Mobile Money des commandes en ligne 
 - [X] T026 [P] Dans `docs/Fiche technique globale GLOMARI.md`, section 9 lot 2 et section 6.2 : `src/paiementenligne.ts` et `POST /paiements/avis/:prestataire/:org`
 - [X] T027 [P] Dans `docs/Guide de mise en ligne.md`, `ERP_PAIEMENT_FACTICE_SECRET` pour l'essai privé seulement, et portefeuilles par défaut Mobile Money à régler avant d'ouvrir le paiement
 - [X] T028 Relire `src/paiementenligne.ts` : signature en temps constant, aucun secret dans le code, aucune donnée personnelle dans les réponses publiques, chaque code passé à `ErreurApi` présent dans `MESSAGES`
-- [ ] T029 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert
-- [ ] T030 Dérouler les scénarios de `specs/002-paiement-mobile-money/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera)
-- [ ] T031 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert (`.github/workflows/verification.yml`)
+- [X] T029 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert
+- [X] T030 Dérouler les scénarios de `specs/002-paiement-mobile-money/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera)
+- [X] T031 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert (`.github/workflows/verification.yml`)
 
 ---
 

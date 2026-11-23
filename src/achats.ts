@@ -102,37 +102,99 @@ const PRIX_HABITUEL = `(select round(avg(x.prix_unitaire))::int8 from (
       and (c2.date_commande, c2.cree_le) < (c.date_commande, c.cree_le)
     order by c2.date_commande desc, c2.cree_le desc limit 3) x)`;
 
+async function exigerModule(ctx: Contexte, entiteId: string) {
+  const { rows } = await ctx.client.query(
+    "select actif from modules_entite where entite_id = $1 and module = 'achats_stocks'", [entiteId],
+  );
+  if (!rows[0]?.actif) throw new ErreurApi(409, "module_inactif");
+}
+
+async function ecrireLignes(ctx: Contexte, commandeId: string, lignes: LigneCommande[]) {
+  await ctx.client.query("delete from lignes_achat where commande_id = $1", [commandeId]);
+  let total = 0;
+  for (const l of lignes) {
+    await produitSuivi(ctx.client, l.produitId);
+    // Achat dans une autre unité (carton, palette…) : le stock et le coût se rangent dans l'unité de base.
+    // Le coût de base est arrondi au franc ; le total de la commande, lui, reste celui de l'unité achetée.
+    const { rows: [p] } = await ctx.client.query("select unite, pieces_par_unite::float, conditionnements, prix_piece from produits where id = $1", [l.produitId]);
+    const u = choisirUnite(p, l.unite);
+    const base = u.base ? l.quantite : enUniteDeBase(l.quantite, u);
+    if (!(base > 0)) throw new ErreurApi(400, "donnees_invalides");
+    const prixBase = u.base ? l.prixUnitaire : Math.round(l.prixUnitaire / u.facteur);
+    await ctx.client.query(
+      `insert into lignes_achat (organisation_id, commande_id, produit_id, quantite, prix_unitaire, poids_kg, prix_vente_prevu, unite, quantite_unite, prix_unite)
+       values ($1, $2, $3, $4, $5, $6, coalesce($7::int8, (select nullif(prix_vente, 0) from produits where id = $3)), $8, $9, $10)`,
+      [ctx.organisationId, commandeId, l.produitId, base, prixBase, l.poidsKg ?? null, l.prixVente ?? null, u.base ? null : u.nom, u.base ? null : l.quantite, u.base ? null : l.prixUnitaire],
+    );
+    total += Math.round(Math.round(l.quantite * 1000) * l.prixUnitaire / 1000);
+  }
+  await ctx.client.query("update commandes_achat set total = $2 where id = $1", [commandeId, total]);
+}
+
+/** L'acheteur désigné doit être un compte actif qui a le droit de passer des commandes sur ce lieu. */
+async function verifierAcheteur(ctx: Contexte, acheteurId: string, entiteId: string) {
+  const { rows: [u] } = await ctx.client.query("select actif from utilisateurs where id = $1", [acheteurId]);
+  if (!u?.actif || !await aPermissionSurEntite(ctx.client, acheteurId, "achats.gerer", entiteId)) throw new ErreurApi(400, "acheteur_invalide");
+}
+
+/** Le transitaire est un partenaire de la même branche ; il reçoit le rôle « transitaire ». */
+async function lierTransitaire(ctx: Contexte, tiersId: string, entiteId: string) {
+  await lierTiers(ctx, tiersId, entiteId);
+  await ctx.client.query(
+    "update tiers set roles = array_append(roles, 'transitaire') where id = $1 and not ('transitaire' = any(roles))", [tiersId],
+  );
+}
+
+const noterEtape = (ctx: Contexte, commandeId: string, etape: string, le: string | null, note: string | null) =>
+  ctx.client.query(
+    `insert into etapes_achat (organisation_id, commande_id, etape, date_etape, note, auteur_id)
+     values ($1, $2, $3, coalesce($4::date, current_date), $5, $6)`,
+    [ctx.organisationId, commandeId, etape, le, note, ctx.utilisateurId],
+  );
+
+export interface NouvelleCommandeAchat {
+  entiteId: string; fournisseurId: string; date: string; datePrevue?: string; notes?: string; lignes: LigneCommande[];
+  origine?: "local" | "import"; acheteurId?: string; referenceFournisseur?: string; paysOrigine?: string;
+  transitaireId?: string; modeTransport?: "maritime" | "aerien"; volumeM3?: number;
+}
+
+/** Bon de commande en brouillon, au nom de l'utilisateur du contexte : depuis l'écran, ou au seuil d'une précommande. */
+export async function creerCommandeAchat(ctx: Contexte, exigerSurEntite: Outils["exigerSurEntite"], b: NouvelleCommandeAchat) {
+  await exigerSurEntite(ctx, "achats.gerer", b.entiteId);
+  await exigerModule(ctx, b.entiteId);
+  await lierTiers(ctx, b.fournisseurId, b.entiteId);
+  if (new Set(b.lignes.map((l) => l.produitId)).size !== b.lignes.length) throw new ErreurApi(400, "produit_en_double");
+  if (b.datePrevue && b.datePrevue < b.date) throw new ErreurApi(400, "date_avant_commande");
+  const acheteurId = b.acheteurId ?? ctx.utilisateurId;
+  await verifierAcheteur(ctx, acheteurId, b.entiteId);
+  if (b.transitaireId) await lierTransitaire(ctx, b.transitaireId, b.entiteId);
+  await ctx.client.query(
+    "update tiers set roles = array_append(roles, 'fournisseur') where id = $1 and not ('fournisseur' = any(roles))",
+    [b.fournisseurId],
+  );
+  const numero = await prochainNumero(ctx.client, `BC-${annee()}`);
+  const { rows } = await ctx.client.query(
+    `insert into commandes_achat (organisation_id, entite_id, numero, fournisseur_id, date_commande, date_prevue, notes, cree_par,
+       origine, acheteur_id, reference_fournisseur, pays_origine, etape_le, transitaire_id, mode_transport, volume_m3)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $5, $13, $14, $15) returning id`,
+    [ctx.organisationId, b.entiteId, numero, b.fournisseurId, b.date, b.datePrevue ?? null, b.notes ?? null, ctx.utilisateurId,
+      b.origine ?? "local", acheteurId, b.referenceFournisseur?.trim() || null, b.paysOrigine?.trim() || null,
+      b.transitaireId ?? null, b.modeTransport ?? null, b.volumeM3 ?? null],
+  );
+  await noterEtape(ctx, rows[0].id, "commandee", b.date, null);
+  await ecrireLignes(ctx, rows[0].id, b.lignes);
+  return (await ctx.client.query("select * from commandes_achat where id = $1", [rows[0].id])).rows[0];
+}
+
+/** Ce que d'autres modules ajoutent aux achats, dans la même transaction : les précommandes (lot 3A) suivent leur bon de commande. */
+export const crochetsAchats: {
+  approbation?: (ctx: Contexte, commandeId: string) => Promise<void>;
+  etape?: (ctx: Contexte, commandeId: string, etape: string, date: string) => Promise<void>;
+  reception?: (ctx: Contexte, commandeId: string, receptionId: string, statut: string) => Promise<void>;
+} = {};
+
 export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
   const { protege, exiger, exigerSurEntite } = outils;
-
-  const exigerModule = async (ctx: Contexte, entiteId: string) => {
-    const { rows } = await ctx.client.query(
-      "select actif from modules_entite where entite_id = $1 and module = 'achats_stocks'", [entiteId],
-    );
-    if (!rows[0]?.actif) throw new ErreurApi(409, "module_inactif");
-  };
-
-  const ecrireLignes = async (ctx: Contexte, commandeId: string, lignes: LigneCommande[]) => {
-    await ctx.client.query("delete from lignes_achat where commande_id = $1", [commandeId]);
-    let total = 0;
-    for (const l of lignes) {
-      await produitSuivi(ctx.client, l.produitId);
-      // Achat dans une autre unité (carton, palette…) : le stock et le coût se rangent dans l'unité de base.
-      // Le coût de base est arrondi au franc ; le total de la commande, lui, reste celui de l'unité achetée.
-      const { rows: [p] } = await ctx.client.query("select unite, pieces_par_unite::float, conditionnements, prix_piece from produits where id = $1", [l.produitId]);
-      const u = choisirUnite(p, l.unite);
-      const base = u.base ? l.quantite : enUniteDeBase(l.quantite, u);
-      if (!(base > 0)) throw new ErreurApi(400, "donnees_invalides");
-      const prixBase = u.base ? l.prixUnitaire : Math.round(l.prixUnitaire / u.facteur);
-      await ctx.client.query(
-        `insert into lignes_achat (organisation_id, commande_id, produit_id, quantite, prix_unitaire, poids_kg, prix_vente_prevu, unite, quantite_unite, prix_unite)
-         values ($1, $2, $3, $4, $5, $6, coalesce($7::int8, (select nullif(prix_vente, 0) from produits where id = $3)), $8, $9, $10)`,
-        [ctx.organisationId, commandeId, l.produitId, base, prixBase, l.poidsKg ?? null, l.prixVente ?? null, u.base ? null : u.nom, u.base ? null : l.quantite, u.base ? null : l.prixUnitaire],
-      );
-      total += Math.round(Math.round(l.quantite * 1000) * l.prixUnitaire / 1000);
-    }
-    await ctx.client.query("update commandes_achat set total = $2 where id = $1", [commandeId, total]);
-  };
 
   const schemaLignes = {
     type: "array", minItems: 1, maxItems: 500,
@@ -147,38 +209,11 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
     },
   } as const;
 
-  /** L'acheteur désigné doit être un compte actif qui a le droit de passer des commandes sur ce lieu. */
-  const verifierAcheteur = async (ctx: Contexte, acheteurId: string, entiteId: string) => {
-    const { rows: [u] } = await ctx.client.query("select actif from utilisateurs where id = $1", [acheteurId]);
-    if (!u?.actif || !await aPermissionSurEntite(ctx.client, acheteurId, "achats.gerer", entiteId)) throw new ErreurApi(400, "acheteur_invalide");
-  };
-
-  /** Le transitaire est un partenaire de la même branche ; il reçoit le rôle « transitaire ». */
-  const lierTransitaire = async (ctx: Contexte, tiersId: string, entiteId: string) => {
-    await lierTiers(ctx, tiersId, entiteId);
-    await ctx.client.query(
-      "update tiers set roles = array_append(roles, 'transitaire') where id = $1 and not ('transitaire' = any(roles))", [tiersId],
-    );
-  };
-
-  const noterEtape = (ctx: Contexte, commandeId: string, etape: string, le: string | null, note: string | null) =>
-    ctx.client.query(
-      `insert into etapes_achat (organisation_id, commande_id, etape, date_etape, note, auteur_id)
-       values ($1, $2, $3, coalesce($4::date, current_date), $5, $6)`,
-      [ctx.organisationId, commandeId, etape, le, note, ctx.utilisateurId],
-    );
-
   const fraisActifs = async (ctx: Contexte, commandeId: string): Promise<number> => Number((await ctx.client.query(
     "select coalesce(sum(montant), 0)::int8 as f from frais_achat where commande_id = $1 and retire_le is null", [commandeId],
   )).rows[0].f);
 
-  app.post<{
-    Body: {
-      entiteId: string; fournisseurId: string; date: string; datePrevue?: string; notes?: string; lignes: LigneCommande[];
-      origine?: "local" | "import"; acheteurId?: string; referenceFournisseur?: string; paysOrigine?: string;
-      transitaireId?: string; modeTransport?: "maritime" | "aerien"; volumeM3?: number;
-    };
-  }>("/achats/commandes", {
+  app.post<{ Body: NouvelleCommandeAchat }>("/achats/commandes", {
     schema: {
       body: {
         type: "object", required: ["entiteId", "fournisseurId", "date", "lignes"],
@@ -192,33 +227,7 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
       },
     },
   }, async (req, reponse) => {
-    const c = await protege(req, async (ctx) => {
-      const b = req.body;
-      await exigerSurEntite(ctx, "achats.gerer", b.entiteId);
-      await exigerModule(ctx, b.entiteId);
-      await lierTiers(ctx, b.fournisseurId, b.entiteId);
-      if (new Set(b.lignes.map((l) => l.produitId)).size !== b.lignes.length) throw new ErreurApi(400, "produit_en_double");
-      if (b.datePrevue && b.datePrevue < b.date) throw new ErreurApi(400, "date_avant_commande");
-      const acheteurId = b.acheteurId ?? ctx.utilisateurId;
-      await verifierAcheteur(ctx, acheteurId, b.entiteId);
-      if (b.transitaireId) await lierTransitaire(ctx, b.transitaireId, b.entiteId);
-      await ctx.client.query(
-        "update tiers set roles = array_append(roles, 'fournisseur') where id = $1 and not ('fournisseur' = any(roles))",
-        [b.fournisseurId],
-      );
-      const numero = await prochainNumero(ctx.client, `BC-${annee()}`);
-      const { rows } = await ctx.client.query(
-        `insert into commandes_achat (organisation_id, entite_id, numero, fournisseur_id, date_commande, date_prevue, notes, cree_par,
-           origine, acheteur_id, reference_fournisseur, pays_origine, etape_le, transitaire_id, mode_transport, volume_m3)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $5, $13, $14, $15) returning id`,
-        [ctx.organisationId, b.entiteId, numero, b.fournisseurId, b.date, b.datePrevue ?? null, b.notes ?? null, ctx.utilisateurId,
-          b.origine ?? "local", acheteurId, b.referenceFournisseur?.trim() || null, b.paysOrigine?.trim() || null,
-          b.transitaireId ?? null, b.modeTransport ?? null, b.volumeM3 ?? null],
-      );
-      await noterEtape(ctx, rows[0].id, "commandee", b.date, null);
-      await ecrireLignes(ctx, rows[0].id, b.lignes);
-      return (await ctx.client.query("select * from commandes_achat where id = $1", [rows[0].id])).rows[0];
-    });
+    const c = await protege(req, (ctx) => creerCommandeAchat(ctx, exigerSurEntite, req.body));
     return reponse.status(201).send(c);
   });
 
@@ -502,6 +511,7 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
       await ctx.client.query("update commandes_achat set etape = $2, etape_le = $3 where id = $1", [req.params.id, req.body.etape, req.body.date]);
       await noterEtape(ctx, req.params.id, req.body.etape, req.body.date, req.body.note?.trim() || null);
       await publierEvenement(ctx.client, "achat.etape", { id: req.params.id, numero: c.numero, etape: req.body.etape });
+      await crochetsAchats.etape?.(ctx, req.params.id, req.body.etape, req.body.date);
       return { etape: req.body.etape };
     });
     return reponse.status(201).send(r);
@@ -594,6 +604,7 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
       const c = await commande(ctx, req.params.id, "achats.approuver");
       if (c.statut !== "brouillon") throw new ErreurApi(409, "commande_figee");
       await exigerSeparation(ctx, "commandes", c.cree_par);
+      await crochetsAchats.approbation?.(ctx, req.params.id);
       await ctx.client.query(
         "update commandes_achat set statut = 'approuvee', approuve_par = $2, approuve_le = now() where id = $1",
         [req.params.id, ctx.utilisateurId],
@@ -668,6 +679,7 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
         await noterEtape(ctx, req.params.id, "en_stock", null, `Réception ${numero}`);
       }
       await publierEvenement(ctx.client, "achat.recu", { id: req.params.id, reception: numero });
+      await crochetsAchats.reception?.(ctx, req.params.id, rec.id, statut);
       return { numero, statut };
     });
     return reponse.status(201).send(r);

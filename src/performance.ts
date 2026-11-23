@@ -252,6 +252,19 @@ export const CATEGORIES_PROBLEME = ["client", "stock", "caisse", "materiel", "in
 export const DESTINATAIRES_PROBLEME = ["responsable", "rh", "finance", "logistique", "informatique", "direction"];
 export { responsablesDe, titulaires };
 
+/** Une tâche par titulaire du droit sur l'entité ; à défaut, à la personne de repli, qui en est aussi l'auteur. */
+export async function confierAuxTitulaires(
+  c: Client, org: string, entiteId: string, permission: Permission, repli: string, titre: string, tiersId: string | null, description: string | null = null,
+): Promise<void> {
+  const ids = await titulaires(c, [permission], entiteId);
+  for (const assigne of ids.length ? ids : [repli]) {
+    await c.query(
+      "insert into taches (organisation_id, entite_id, titre, description, assigne_a, cree_par, tiers_id, echeance) values ($1, $2, $3, $4, $5, $6, $7, (now() at time zone 'Africa/Douala')::date + 1)",
+      [org, entiteId, titre, description, assigne, repli, tiersId],
+    );
+  }
+}
+
 export function enregistrerPerformance(app: FastifyInstance, pool: pg.Pool, outils: Outils, taches: TachePlanifiee[], dossier?: string): void {
   const { protege, exiger, exigerSurEntite } = outils;
   KPI.force_proposition = KPI_FORCE;

@@ -310,7 +310,10 @@ Paiement à la livraison : reservee ──(confirmation interne)──► colis 
 | `POST /marketplace/:org/commandes` | Crée la commande et réserve le stock ; renvoie référence et lien de suivi | Lot 1 |
 | `GET /marketplace/:org/commandes/:reference?jeton=…` | Statut de la commande et du colis | Lot 1 |
 | `POST /marketplace/:org/commandes/:reference/payer` | Lance le paiement Mobile Money | Lot 2 |
-| `GET /marketplace/:org/campagnes` et `POST …/campagnes/:id/inscriptions` | Précommandes | Lot 3 |
+| `GET /marketplace/:org/campagnes` (et `…/campagnes/:id`) et `POST …/campagnes/:id/inscriptions` | Campagnes ouvertes (prix, acompte, date limite, progression en %, conditions), inscription sur la liste d'attente. Jamais de quantité, de fournisseur ni de prix d'achat | Lot 3A |
+| `POST /marketplace/:org/precommandes/:reference/payer` | Lance le paiement Mobile Money de l'acompte | Lot 3A |
+| `GET /marketplace/:org/precommandes/:reference?jeton=…` | Suivi de la précommande : statut, étapes de l'arrivage, solde et son délai | Lot 3A |
+| `POST /marketplace/:org/precommandes/:reference/solde` | Choix de la remise et création de la commande du solde, acompte déduit ; elle se paie par la route de paiement des commandes | Lot 3A |
 | `POST /marketplace/:org/care/messages` | Conversation avec l'assistant Care | Lot 4 |
 | `GET /capture/:code` et `POST /capture/:code` | Formulaires du site web → CRM | Existant |
 | `GET /offre-public/:code` et `POST /offre-public/:code` | Offres d'emploi et candidatures | Existant |
@@ -339,7 +342,7 @@ Toutes ces routes sont limitées en débit, comme celles qui existent déjà. El
 | `vente.comptoir`, `achat.recu`, `transfert.recu` | Vente en caisse, réception, transfert | Existant |
 | `commande_web.creee`, `commande_web.confirmee`, `commande_web.payee`, `commande_web.facturee`, `commande_web.expiree`, `commande_web.annulee` | Cycle de la commande en ligne (confirmée : paiement à la livraison, colis créé) | Lots 1 et 2 |
 | `stock.disponibilite_modifiee`, `catalogue.article_modifie` | Stock vendable ou article modifié | Lot 1 |
-| `precommande.seuil_atteint`, `precommande.arrivage_etape` | Précommandes | Lot 3 |
+| `precommande.inscription_validee`, `precommande.seuil_atteint`, `precommande.arrivage_etape`, `precommande.arrivage_recu`, `precommande.soldee`, `precommande.acompte_conserve`, `precommande.a_rembourser`, `precommande.campagne_annulee`, `precommande.campagne_livree` | Cycle des précommandes ; sans nom ni téléphone, le destinataire se retrouve par la référence | Lot 3A |
 
 Les webhooks sont livrés au moins une fois. `glomari-web` dédoublonne par l'identifiant d'événement.
 
@@ -492,6 +495,14 @@ Tests : seuil atteint = un seul brouillon ; acompte jamais compté deux fois ; G
 ```
 
 Recette : une campagne complète, de la liste d'attente à la livraison des précommandes.
+
+**État au 23 novembre 2026.**
+
+- **Partie A (précommandes) livrée** :
+  - fichiers : migration `0049_precommandes.sql` (la numérotation a glissé), `src/precommandes.ts`, `public/precommandes.js` ; spécification `specs/003-precommandes-arrivage/` ;
+  - les étapes publiées aux inscrits sont celles du bon de commande relié ; le dossier d'importation porte les frais ;
+  - le solde se paie par une commande en ligne qui porte l'acompte ; celui-ci s'impute sur la facture par un règlement relié, sans nouvel encaissement.
+- **Partie B (achats à l'import)** : à faire, dans un cycle séparé.
 
 ### Lot 4 · Messages, Care et IA
 

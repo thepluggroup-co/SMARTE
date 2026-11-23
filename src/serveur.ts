@@ -49,6 +49,7 @@ import { enregistrerFournisseurs } from "./fournisseurs.js";
 import { enregistrerMall } from "./mall.js";
 import { enregistrerCanalEnLigne, expirerCommandesWeb } from "./canalenligne.js";
 import { enregistrerPaiementEnLigne, type PrestatairePaiement } from "./paiementenligne.js";
+import { enregistrerPrecommandes, expirerPrecommandes } from "./precommandes.js";
 import { enregistrerPilotage } from "./pilotage.js";
 import { enregistrerRh } from "./rh.js";
 import { enregistrerTresorerie } from "./tresorerie.js";
@@ -814,6 +815,7 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
   enregistrerPaiementEnLigne(app, pool, { protege, exigerSurEntite, exiger }, {
     prestataires: options.prestatairesPaiement ?? [], urlPublique: options.urlPublique, paiementsParMinute: options.debitCanal?.paiements ?? 10,
   });
+  enregistrerPrecommandes(app, pool, { protege, exigerSurEntite, exiger }, taches, { commandesParMinute: options.debitCanal?.commandes ?? 20 });
   enregistrerRecouvrement(app, { protege, exigerSurEntite, exiger });
   enregistrerProspection(app, pool, { protege, exigerSurEntite, exiger });
   enregistrerSocle(app, { protege, exigerSurEntite, exiger });
@@ -827,12 +829,16 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
     };
     const minuterie = setInterval(() => { tour().catch((e) => app.log.error(e, "tâches planifiées")); }, 3600000);
     const envoi = setInterval(() => { app.pousserWebhooks?.().catch((e: unknown) => app.log.error(e, "webhooks")); }, 60000);
-    // Une réservation de commande en ligne dure 30 minutes : la tâche horaire la laisserait bloquer la caisse trop longtemps.
+    // Une réservation de commande en ligne, ou une place de précommande en attente d'acompte, dure 30 minutes :
+    // la tâche horaire la laisserait bloquer la caisse ou la campagne trop longtemps.
     const expiration = setInterval(() => {
       (async () => {
         const { rows } = await pool.query("select id from registre_organisations");
-        for (const r of rows) await dansOrganisation(pool, r.id, expirerCommandesWeb);
-      })().catch((e) => app.log.error(e, "expiration commandes web"));
+        for (const r of rows) {
+          await dansOrganisation(pool, r.id, expirerCommandesWeb);
+          await dansOrganisation(pool, r.id, expirerPrecommandes);
+        }
+      })().catch((e) => app.log.error(e, "expiration commandes web et précommandes"));
     }, 60000);
     minuterie.unref(); envoi.unref(); expiration.unref();
     app.addHook("onClose", async () => { clearInterval(minuterie); clearInterval(envoi); clearInterval(expiration); });

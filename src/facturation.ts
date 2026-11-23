@@ -551,10 +551,12 @@ export function enregistrerFacturation(app: FastifyInstance, outils: Outils, poo
     schema: { params: paramId, body: motifBody },
   }, async (req) =>
     protege(req, async (ctx) => {
-      const r = await ctx.client.query("select facture_id, annule_le from reglements where id = $1", [req.params.id]);
+      const r = await ctx.client.query("select facture_id, annule_le, acompte_id from reglements where id = $1", [req.params.id]);
       if (!r.rows[0]) throw new ErreurApi(404, "introuvable");
       await documentAutorise(ctx, r.rows[0].facture_id, "facturation.administrer", true);
       if (r.rows[0].annule_le) throw new ErreurApi(409, "deja_annule");
+      // L'acompte d'une précommande imputé sur sa facture ne redevient pas disponible : il ne doit compter qu'une fois.
+      if (r.rows[0].acompte_id) throw new ErreurApi(409, "reglement_acompte_non_annulable");
       await ctx.client.query("update reglements set annule_le = now(), motif_annulation = $2 where id = $1", [req.params.id, req.body.motif]);
       return { annule: true };
     }),

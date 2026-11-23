@@ -33,7 +33,7 @@ export function prevoirMois(historique: number[]): number {
 const SOURCES_RAPPORT: Record<string, { base: string; mesure: string; date: string; entite: string; dims: Record<string, string> }> = {
   ventes: { base: "documents_vente d join tiers t on t.id = d.tiers_id", mesure: "case when d.type = 'avoir' then -d.total_ht else d.total_ht end", date: "d.date_document", entite: "d.entite_id", dims: { mois: "to_char(d.date_document, 'YYYY-MM')", client: "t.nom", entite: "(select nom from entites e where e.id = d.entite_id)" } },
   caisse: { base: "ventes_comptoir d", mesure: "d.total_ht", date: "(d.cree_le at time zone 'Africa/Douala')::date", entite: "d.entite_id", dims: { mois: "to_char(d.cree_le at time zone 'Africa/Douala', 'YYYY-MM')", entite: "(select nom from entites e where e.id = d.entite_id)", jour: "(d.cree_le at time zone 'Africa/Douala')::date::text" } },
-  encaissements: { base: "reglements r join documents_vente d on d.id = r.facture_id join tiers t on t.id = d.tiers_id", mesure: "r.montant", date: "(r.encaisse_le at time zone 'Africa/Douala')::date", entite: "d.entite_id", dims: { mois: "to_char(r.encaisse_le at time zone 'Africa/Douala', 'YYYY-MM')", client: "t.nom", moyen: "r.moyen" } },
+  encaissements: { base: "reglements r join documents_vente d on d.id = r.facture_id and r.acompte_id is null join tiers t on t.id = d.tiers_id", mesure: "r.montant", date: "(r.encaisse_le at time zone 'Africa/Douala')::date", entite: "d.entite_id", dims: { mois: "to_char(r.encaisse_le at time zone 'Africa/Douala', 'YYYY-MM')", client: "t.nom", moyen: "r.moyen" } },
 };
 const FILTRES: Record<string, string> = { ventes: "d.type in ('facture', 'avoir') and d.statut = 'emis'", caisse: "d.annulee_le is null", encaissements: "r.annule_le is null" };
 

@@ -32,6 +32,13 @@ La deuxième commande de provisionnement crée sous GLOMARI les lieux « GLOMARI
 - Le prestataire réel se branche après le choix de la direction ; ses identifiants vont dans `.env`, jamais dans le dépôt.
 - Avant l'ouverture au public, relever `ERP_CANAL_COMMANDES_PAR_MINUTE` et `ERP_CANAL_PAIEMENTS_PAR_MINUTE` : le serveur de la Marketplace appelle l'ERP depuis une seule adresse.
 
+## Précommandes (lot 3A)
+
+- Les acomptes passent par le paiement en ligne : mêmes portefeuilles par défaut Orange Money et MTN MoMo, même prestataire. Essai privé avec le prestataire factice seulement.
+- Avant l'ouverture au public, faire relire par un juriste le texte des conditions montré au client (solde à payer dans le délai, acompte conservé sinon, remboursement si la campagne est annulée).
+- Activer la séparation des tâches pour les commandes (« Accès » › séparation) : le bon de commande préparé au seuil est au nom de l'auteur de la campagne, une autre personne l'approuve.
+- Le trésorier enregistre chaque remboursement depuis « Paiements en ligne » après avoir rendu l'argent par l'opérateur ; un acompte encore dans les encaissements en attente se place d'abord dans un portefeuille.
+
 ## Sauvegardes
 
 ```cron
