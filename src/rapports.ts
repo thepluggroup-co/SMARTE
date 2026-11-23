@@ -81,12 +81,16 @@ export function enregistrerRapports(app: FastifyInstance, outils: Outils): void 
 
       // Lignes vendues en caisse sur la période, par lieu et par article, retours de la période déduits.
       const { rows: lignes } = await c.query(
-        `select x.entite_id, x.produit_id, p.code, p.nom, p.unite, p.cout_moyen, sum(x.quantite)::float as quantite, sum(x.ht)::int8 as ht, sum(x.ttc)::int8 as ttc from (
-           select v.entite_id, l.produit_id, l.quantite, l.montant_ht as ht, l.montant_ht + l.montant_taxes as ttc
+        `select x.entite_id, x.produit_id, p.code, p.nom, p.unite, p.cout_moyen, sum(x.quantite)::float as quantite, sum(x.ht)::int8 as ht, sum(x.ttc)::int8 as ttc,
+           sum(x.depot)::int8 as cout_depot from (
+           -- Un article en dépôt-vente coûte ce que GLOMARI reverse au fournisseur, pas un coût moyen.
+           select v.entite_id, l.produit_id, l.quantite, l.montant_ht as ht, l.montant_ht + l.montant_taxes as ttc,
+             remuneration_depot(l.produit_id, coalesce(v.vendue_le, v.cree_le), l.quantite, l.montant_ht) as depot
            from lignes_comptoir l join ventes_comptoir v on v.id = l.vente_id
            where v.annulee_le is null and v.entite_id = any($1::uuid[]) and ${JOUR("coalesce(v.vendue_le, v.cree_le)")} between $2 and $3
            union all
-           select t.entite_id, r.produit_id, -r.quantite, -r.montant_ht, -(r.montant_ht + r.montant_taxes)
+           select t.entite_id, r.produit_id, -r.quantite, -r.montant_ht, -(r.montant_ht + r.montant_taxes),
+             -remuneration_depot(r.produit_id, t.cree_le, r.quantite, r.montant_ht)
            from lignes_retour_comptoir r join retours_comptoir t on t.id = r.retour_id where t.entite_id = any($1::uuid[]) and ${JOUR("t.cree_le")} between $2 and $3
          ) x join produits p on p.id = x.produit_id group by x.entite_id, x.produit_id, p.code, p.nom, p.unite, p.cout_moyen`, [ventes, du, au],
       );
@@ -95,7 +99,8 @@ export function enregistrerRapports(app: FastifyInstance, outils: Outils): void 
         const a = parArticle.get(l.produit_id) ?? { code: l.code, nom: l.nom, unite: l.unite, quantite: 0, montant: 0, ht: 0, cout: 0 };
         a.quantite += l.quantite; a.montant += Number(l.ttc); a.ht += Number(l.ht);
         // Le coût n'entre dans le calcul que là où la personne a le droit de le voir ; sinon la marge reste masquée.
-        a.cout = a.cout === null || !valeur.has(String(l.entite_id)) ? null : a.cout + Math.round(l.quantite * Number(l.cout_moyen));
+        a.cout = a.cout === null || !valeur.has(String(l.entite_id)) ? null
+          : a.cout + (l.cout_depot !== null ? Number(l.cout_depot) : Math.round(l.quantite * Number(l.cout_moyen)));
         parArticle.set(l.produit_id, a);
       }
       const articles = [...parArticle.values()].map((a) => ({ ...a, quantite: Math.round(a.quantite * 1000) / 1000 }));

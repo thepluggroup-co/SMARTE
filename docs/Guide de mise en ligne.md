@@ -39,6 +39,15 @@ La deuxième commande de provisionnement crée sous GLOMARI les lieux « GLOMARI
 - Activer la séparation des tâches pour les commandes (« Accès » › séparation) : le bon de commande préparé au seuil est au nom de l'auteur de la campagne, une autre personne l'approuve.
 - Le trésorier enregistre chaque remboursement depuis « Paiements en ligne » après avoir rendu l'argent par l'opérateur ; un acompte encore dans les encaissements en attente se place d'abord dans un portefeuille.
 
+## Achats à l'import (lot 3B)
+
+- Avant de commander en yuans, dollars ou euros : la comptabilité enregistre le taux du jour (Comptabilité › Devises). Sans taux connu à la date de la commande, ou avant, la commande est refusée.
+- Les acomptes au fabricant se versent depuis le détail du bon de commande approuvé, par une personne qui a le rôle Trésorier (droit `tresorerie.gerer`). Payer une facture fournisseur demande désormais aussi ce droit : donner le rôle Trésorier à qui paie les fournisseurs.
+- Activer la séparation des tâches pour les factures fournisseurs (« Accès » › séparation) : celui qui saisit la facture du fabricant n'est pas celui qui la valide, et c'est la validation qui impute les acomptes.
+- Dépôt-vente : déclarer l'article (rôle Achats), enregistrer l'arrivée de la marchandise confiée (magasinier), puis établir chaque mois le relevé du fournisseur (comptable) ; la facture créée se valide et se paie en comptabilité.
+- Couverture de stock : calculée chaque nuit après 2 h ; les acheteurs et responsables du stock voient la notification le matin. Les tâches planifiées doivent donc tourner sur le serveur.
+- Faire confirmer par l'expert-comptable les comptes 4091 (avances fournisseurs) et 6011 (relevés de dépôt-vente) avant de vraies données : le système ne remplace pas un expert agréé.
+
 ## Sauvegardes
 
 ```cron

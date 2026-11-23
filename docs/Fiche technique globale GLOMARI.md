@@ -502,7 +502,14 @@ Recette : une campagne complète, de la liste d'attente à la livraison des pré
   - fichiers : migration `0049_precommandes.sql` (la numérotation a glissé), `src/precommandes.ts`, `public/precommandes.js` ; spécification `specs/003-precommandes-arrivage/` ;
   - les étapes publiées aux inscrits sont celles du bon de commande relié ; le dossier d'importation porte les frais ;
   - le solde se paie par une commande en ligne qui porte l'acompte ; celui-ci s'impute sur la facture par un règlement relié, sans nouvel encaissement.
-- **Partie B (achats à l'import)** : à faire, dans un cycle séparé.
+- **Partie B (achats à l'import) livrée** :
+  - fichiers : migration `0050_achats_import.sql`, `src/acomptes.ts`, `src/depotvente.ts`, `src/couverture.ts`, `public/depotvente.js`, onglet « Couverture » du module Stocks ; spécification `specs/004-achats-import/` ;
+  - acompte au fournisseur sur un bon de commande approuvé, versé par le trésorier (`tresorerie.gerer`), imputé seul et une seule fois à la validation de la facture reliée (paiement relié, sans nouvelle sortie d'argent) ; payer une facture fournisseur exige désormais aussi le droit de trésorerie ;
+  - commande en USD, CNY ou EUR au taux de `taux_change` du jour de commande, total exact en FCFA, taux figé à l'approbation ;
+  - dépôt-vente : stock confié au coût 0, rémunération au choix par article (prix fixe par pièce ou commission, choix d'Achille du 23 novembre 2026), relevé qui crée la facture du fournisseur en brouillon, chaque vente relevée une seule fois ;
+  - couverture de stock par catégorie (stock divisé par les ventes moyennes des 90 derniers jours), notification unique au-delà de 60 jours, avertissement à l'approbation d'une commande ;
+  - l'option « coefficient d'importation au coût moyen » n'est pas construite : les frais du bon de commande entrent déjà dans le coût à la réception (décision d'Achille du 23 novembre 2026) ;
+  - comptes 4091 (avances fournisseurs) et 6011 (relevés de dépôt-vente) à confirmer par l'expert-comptable.
 
 ### Lot 4 · Messages, Care et IA
 
@@ -770,5 +777,5 @@ Exemples :
 | Durée de conservation du code d'affilié | W9 | 30 jours |
 | Prestataire de la plateforme : développeur de SGC ou sous-traitant | Tous les lots | À confirmer |
 | Next.js pour glomari-web | W1 | Recommandé, à valider par le responsable technique |
-| Application du coefficient d'importation au coût moyen | ERP lot 3 | Désactivée |
+| Application du coefficient d'importation au coût moyen | ERP lot 3 | Tranchée le 23 novembre 2026 : pas d'option, les frais du bon de commande suffisent |
 | Contenus du site : adresse du Mall, horaires, textes légaux, conditions de vente, politique de retours | W2 | [À FOURNIR] |

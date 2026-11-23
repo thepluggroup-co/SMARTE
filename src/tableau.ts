@@ -264,7 +264,9 @@ export function enregistrerTableau(app: FastifyInstance, outils: Outils): void {
         if (treso.length) {
           const { rows: [d] } = await c.query(
             `with m as (${MOUVEMENTS("$1")} and coalesce(o.source_type, m.source_type) is distinct from 'retour'
-               and coalesce(o.source_type, m.source_type) is distinct from 'remboursement_en_ligne' and not exists (
+               and coalesce(o.source_type, m.source_type) is distinct from 'remboursement_en_ligne'
+               -- Un acompte au fournisseur paie une commande déjà comptée dans les achats.
+               and coalesce(o.source_type, m.source_type) is distinct from 'acompte_fournisseur' and not exists (
                select 1 from paiements_fournisseur pf join factures_fournisseur ff on ff.id = pf.facture_id
                where pf.id = coalesce(o.source_id, m.source_id) and coalesce(o.source_type, m.source_type) = 'paiement_fournisseur' and ff.commande_id is not null))
              select coalesce(-sum(montant) filter (where sens = 'sortie' and jour between $2 and $3), 0)::int8 as total,

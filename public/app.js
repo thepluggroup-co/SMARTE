@@ -354,6 +354,20 @@ const MESSAGES = {
   remboursement_impossible: "Ce paiement n'est pas à rembourser, ou il est déjà remboursé.",
   encaissement_a_placer: "Placez d'abord cet encaissement dans un portefeuille (encaissements en attente).",
   reglement_acompte_non_annulable: "Un acompte imputé sur une facture ne s'annule pas.",
+  acompte_superieur_commande: "Le total des acomptes dépasserait le montant de la commande.",
+  acompte_impute: "Cet acompte est déjà déduit d'une facture : il ne s'annule plus.",
+  acompte_a_recuperer: "Un acompte versé n'est pas encore déduit ni remboursé : la commande ne s'annule pas.",
+  acompte_insuffisant: "Cet acompte n'a plus assez de montant disponible.",
+  imputation_non_annulable: "Un acompte déduit d'une facture ne revient qu'en annulant la facture.",
+  taux_inconnu: "Aucun taux de change n'est enregistré pour cette devise à cette date : la comptabilité doit d'abord le saisir.",
+  prix_devise_obligatoire: "Pour une commande en devise, chaque ligne a un prix dans la devise (et pas en FCFA).",
+  prix_obligatoire: "Chaque ligne de la commande doit avoir un prix.",
+  article_en_depot_vente: "Cet article est en dépôt-vente : il ne s'achète pas sur un bon de commande.",
+  article_deja_achete: "Cet article a déjà du stock acheté ou une commande en cours : il ne peut pas passer en dépôt-vente.",
+  depot_inactif: "Cet article n'est plus en dépôt-vente.",
+  stock_restant: "Il reste du stock de cet article : rendez-le ou vendez-le avant de terminer le dépôt-vente.",
+  releve_vide: "Aucune vente à reverser sur cette période : rien n'est relevé.",
+  periode_invalide: "La période est invalide : la fin doit suivre le début et ne pas dépasser aujourd'hui.",
 };
 const texteErreur = (e) => e instanceof TypeError ? "Pas de connexion. Réessayez quand internet revient." : MESSAGES[e.code] || "Une erreur est survenue. Réessayez.";
 
@@ -444,6 +458,7 @@ function vue(...contenu) {
       dansEspace("commerce") && droits.includes("achats.voir") ? h("button", { class: "discret", onclick: () => ecranAchats() }, "Achats") : null,
       dansEspace("commerce") && (droits.includes("achats.voir") || droits.includes("facturation.voir")) ? h("button", { class: "discret", onclick: () => ecranPrecommandes() }, "Précommandes") : null,
       dansEspace("commerce") && droits.includes("stocks.voir") ? h("button", { class: "discret", onclick: () => ecranStocks() }, "Stocks") : null,
+      dansEspace("commerce") && (droits.includes("achats.voir") || droits.includes("stocks.voir")) ? h("button", { class: "discret", onclick: () => ecranDepotVente() }, "Dépôt-vente") : null,
       dansEspace("commerce") && droits.includes("magasins.gerer") ? h("button", { class: "discret", onclick: () => ecranMagasins() }, "Magasins") : null,
       dansEspace("commerce") && (droits.includes("stocks.voir") || droits.includes("caisse.superviser")) ? h("button", { class: "discret", onclick: () => ecranRapportsStockVentes() }, "Rapports stock et ventes") : null,
       dansEspace("commerce") && droits.includes("caisse.vendre") ? h("button", { class: "discret", onclick: () => ecranCaisse() }, "Caisse") : null,
