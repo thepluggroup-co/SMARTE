@@ -194,9 +194,9 @@ description: "Liste des tâches des messages automatiques et des avis publiés d
   - aucune donnée de GTA ;
   - aucun appel réseau dans les tests ;
   - la règle « aucun nom déclaré deux fois » des écrans respectée.
-- [ ] T032 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
-- [ ] T033 Dérouler les scénarios de `specs/005-messages-avis/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera).
-- [ ] T034 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert.
+- [X] T032 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
+- [X] T033 Dérouler les scénarios de `specs/005-messages-avis/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera).
+- [X] T034 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert.
 
 ---
 
