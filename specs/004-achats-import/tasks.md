@@ -225,9 +225,9 @@ description: "Liste des tâches des achats à l'import de GLOMARI (lot 3, partie
   - chaque code passé à `ErreurApi` présent dans `MESSAGES` ;
   - aucune donnée de GTA ;
   - la règle « aucun nom déclaré deux fois » des écrans respectée.
-- [ ] T038 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
-- [ ] T039 Dérouler les scénarios de `specs/004-achats-import/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera).
-- [ ] T040 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert.
+- [X] T038 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
+- [X] T039 Dérouler les scénarios de `specs/004-achats-import/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera).
+- [X] T040 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert.
 
 ---
 
