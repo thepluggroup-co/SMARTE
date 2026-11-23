@@ -50,6 +50,14 @@ export async function expirerCommandesWeb(c: Client): Promise<number> {
   return rows.length;
 }
 
+const AVIS_PAR_PAGE = 20;
+/** « Awa Ngono » devient « Awa N. » : un avis public ne montre jamais le nom complet. */
+export function auteurPublic(nom: string | null): string {
+  const mots = (nom ?? "").trim().split(/\s+/).filter(Boolean);
+  if (!mots.length) return "Client";
+  return mots.length === 1 ? mots[0]! : `${mots[0]} ${mots.at(-1)![0]!.toUpperCase()}.`;
+}
+
 export interface Boutique { org: string; configId: string; branche: string; nom: string }
 export interface ChoixLivraison { modeLivraison: string; zoneId?: string; pointRelaisId?: string; adresse?: string }
 interface CorpsCommande extends ChoixLivraison {
@@ -206,7 +214,9 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
            coalesce((select json_agg(f.position order by f.position) from photos_produits f where f.produit_id = p.id), '[]'::json) as photos,
            (select json_build_object('type', o.type, 'valeur', o.valeur, 'fin', o.fin) from promotions o
              where o.produit_id = p.id and o.actif and (now() at time zone 'Africa/Douala')::date between o.debut and o.fin
-             order by o.cree_le desc limit 1) as promotion
+             order by o.cree_le desc limit 1) as promotion,
+           (select json_build_object('moyenne', round(avg(r.note), 1)::float, 'nombre', count(*)::int)
+              from retours_clients r where r.produit_id = p.id and r.statut = 'publie') as avis
          from produits p
          left join categories_articles g on g.id = p.categorie_id and g.actif
          left join categories_articles gp on gp.id = g.parent_id
@@ -230,6 +240,30 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
       };
     }),
   );
+
+  /** Avis vérifiés et publiés d'un article : jamais le nom complet, le téléphone ni la commande du client. */
+  app.get<{ Params: { org: string; id: string }; Querystring: { page?: number } }>("/marketplace/:org/produits/:id/avis", {
+    config: parMinute(60),
+    schema: { querystring: { type: "object", properties: { page: { type: "integer", minimum: 1, maximum: 10000 } } } },
+  }, async (req) => {
+    if (!UUID.test(req.params.id)) throw new ErreurApi(404, "introuvable");
+    return parBoutique(pool, req.params.org, async (c, b) => {
+      const { rows: [p] } = await c.query(`select p.id from produits p where p.id = $1 and ${ARTICLE_EN_LIGNE} and entite_branche(p.entite_id) = $2`, [req.params.id, b.branche]);
+      if (!p) throw new ErreurApi(404, "introuvable");
+      const { rows: [s] } = await c.query("select round(avg(note), 1)::float as moyenne, count(*)::int as nombre from retours_clients where produit_id = $1 and statut = 'publie'", [p.id]);
+      const page = req.query.page ?? 1;
+      const { rows } = await c.query(
+        `select r.note, r.commentaire, (r.cree_le at time zone 'Africa/Douala')::date::text as date, r.reponse, t.nom
+         from retours_clients r join demandes_retour d on d.id = r.demande_id left join tiers t on t.id = d.tiers_id
+         where r.produit_id = $1 and r.statut = 'publie' order by r.cree_le desc, r.id limit $2 offset $3`,
+        [p.id, AVIS_PAR_PAGE, (page - 1) * AVIS_PAR_PAGE],
+      );
+      return {
+        produit_id: p.id, moyenne: s.moyenne, nombre: s.nombre, page, pages: Math.max(1, Math.ceil(s.nombre / AVIS_PAR_PAGE)),
+        avis: rows.map((r) => ({ note: r.note, commentaire: r.commentaire, date: r.date, auteur: auteurPublic(r.nom), achat_verifie: true, reponse: r.reponse })),
+      };
+    });
+  });
 
   app.get<{ Params: { org: string; id: string; position: number } }>("/marketplace/:org/produits/:id/photos/:position", {
     config: parMinute(120),

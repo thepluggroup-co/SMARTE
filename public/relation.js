@@ -130,12 +130,14 @@ async function chronologie(tiersId) {
 function formFiche(t, retour) {
   if (!droits.includes("tiers.modifier")) return null;
   return h("details", { class: "carte" }, h("summary", {}, "Modifier la fiche client"), formulaire(async (v) => {
-    await api("PATCH", `/tiers/${t.id}`, { nom: v.nom.trim(), telephone: v.telephone.trim() || null, email: v.email.trim() || null });
+    await api("PATCH", `/tiers/${t.id}`, { nom: v.nom.trim(), telephone: v.telephone.trim() || null, email: v.email.trim() || null, nePasContacter: v.nePasContacter === "oui" });
     retour();
   }, [h("div", { class: "grille" },
     champ("Nom", { name: "nom", value: t.nom, required: true }),
     champ("Téléphone", { name: "telephone", value: t.telephone || "" }),
-    champ("E-mail", { name: "email", type: "email", value: t.email || "" })),
+    champ("E-mail", { name: "email", type: "email", value: t.email || "" }),
+    // Les messages de ses commandes (suivi, code de livraison, solde) restent envoyés.
+    choix("nePasContacter", "Demandes d'avis par message", [["non", "Oui, il peut les recevoir"], ["oui", "Non, il ne souhaite pas être contacté"]], t.ne_pas_contacter ? "oui" : "non")),
   ], "Enregistrer la fiche"));
 }
 

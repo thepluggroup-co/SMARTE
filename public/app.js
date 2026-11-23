@@ -368,6 +368,9 @@ const MESSAGES = {
   stock_restant: "Il reste du stock de cet article : rendez-le ou vendez-le avant de terminer le dépôt-vente.",
   releve_vide: "Aucune vente à reverser sur cette période : rien n'est relevé.",
   periode_invalide: "La période est invalide : la fin doit suivre le début et ne pas dépasser aujourd'hui.",
+  renvoi_impossible: "Ce message ne peut pas être renvoyé : il n'est ni en échec ni sans numéro, ou un renvoi attend déjà.",
+  article_hors_commande: "Cet article ne fait pas partie de la commande à noter.",
+  numero_invalide: "Ce numéro n'est pas un numéro de mobile camerounais valide.",
 };
 const texteErreur = (e) => e instanceof TypeError ? "Pas de connexion. Réessayez quand internet revient." : MESSAGES[e.code] || "Une erreur est survenue. Réessayez.";
 
@@ -459,6 +462,7 @@ function vue(...contenu) {
       dansEspace("commerce") && (droits.includes("achats.voir") || droits.includes("facturation.voir")) ? h("button", { class: "discret", onclick: () => ecranPrecommandes() }, "Précommandes") : null,
       dansEspace("commerce") && droits.includes("stocks.voir") ? h("button", { class: "discret", onclick: () => ecranStocks() }, "Stocks") : null,
       dansEspace("commerce") && (droits.includes("achats.voir") || droits.includes("stocks.voir")) ? h("button", { class: "discret", onclick: () => ecranDepotVente() }, "Dépôt-vente") : null,
+      dansEspace("commerce") && (droits.includes("care.voir") || droits.includes("facturation.administrer")) ? h("button", { class: "discret", onclick: () => ecranMessagesClients() }, "Messages aux clients") : null,
       dansEspace("commerce") && droits.includes("magasins.gerer") ? h("button", { class: "discret", onclick: () => ecranMagasins() }, "Magasins") : null,
       dansEspace("commerce") && (droits.includes("stocks.voir") || droits.includes("caisse.superviser")) ? h("button", { class: "discret", onclick: () => ecranRapportsStockVentes() }, "Rapports stock et ventes") : null,
       dansEspace("commerce") && droits.includes("caisse.vendre") ? h("button", { class: "discret", onclick: () => ecranCaisse() }, "Caisse") : null,

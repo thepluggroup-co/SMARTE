@@ -48,6 +48,14 @@ La deuxième commande de provisionnement crée sous GLOMARI les lieux « GLOMARI
 - Couverture de stock : calculée chaque nuit après 2 h ; les acheteurs et responsables du stock voient la notification le matin. Les tâches planifiées doivent donc tourner sur le serveur.
 - Faire confirmer par l'expert-comptable les comptes 4091 (avances fournisseurs) et 6011 (relevés de dépôt-vente) avant de vraies données : le système ne remplace pas un expert agréé.
 
+## Messages aux clients (lot 4A)
+
+- Essai privé, données fictives seulement : `ERP_MESSAGES_FACTICE=1` active le prestataire factice. Les messages sont marqués envoyés sans partir ; ne jamais l'activer avec de vraies données, les clients croiraient avoir été prévenus.
+- Les messages partent chaque minute entre 7 h et 21 h (heure de Douala) : le serveur doit tourner avec ses tâches planifiées (`webhooksAuto`, actif dans `src/index.ts`).
+- Ouvrir « Messages aux clients » avec la direction : vérifier les types actifs et leur canal (SMS par défaut ; la demande d'avis après un achat en magasin est coupée tant qu'elle n'est pas activée).
+- Le prestataire réel se branche après le choix de la direction (identifiants dans `.env`, jamais dans le dépôt). Pour WhatsApp, faire approuver à l'avance les modèles de messages, dont les textes sont fixés dans `src/messages.ts`.
+- L'équipe Care suit le journal : un message en échec ou « sans numéro » se renvoie, au besoin avec le bon numéro.
+
 ## Sauvegardes
 
 ```cron

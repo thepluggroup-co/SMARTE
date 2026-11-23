@@ -57,7 +57,7 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
     Params: { id: string };
     Body: {
       nom?: string; email?: string | null; telephone?: string | null; langue?: string;
-      roles?: string[]; archive?: boolean; ignorerDoublons?: boolean;
+      roles?: string[]; archive?: boolean; ignorerDoublons?: boolean; nePasContacter?: boolean;
     };
   }>("/tiers/:id", {
     schema: {
@@ -72,6 +72,8 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
           roles: { type: "array", items: { type: "string", maxLength: 30 }, maxItems: 10 },
           archive: { type: "boolean" },
           ignorerDoublons: { type: "boolean" },
+          // Arrête les demandes d'avis ; les messages de ses commandes restent envoyés.
+          nePasContacter: { type: "boolean" },
         },
       },
     },
@@ -95,9 +97,9 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
       try {
         const { rows } = await ctx.client.query(
           `update tiers set nom = coalesce($2, nom), email = $3, telephone = $4, langue = coalesce($5, langue),
-             roles = coalesce($6, roles), archive = coalesce($7, archive)
-           where id = $1 returning id, type, nom, email, telephone, langue, roles, archive`,
-          [req.params.id, b.nom ?? null, email, telephone, b.langue ?? null, b.roles ?? null, b.archive ?? null],
+             roles = coalesce($6, roles), archive = coalesce($7, archive), ne_pas_contacter = coalesce($8, ne_pas_contacter)
+           where id = $1 returning id, type, nom, email, telephone, langue, roles, archive, ne_pas_contacter`,
+          [req.params.id, b.nom ?? null, email, telephone, b.langue ?? null, b.roles ?? null, b.archive ?? null, b.nePasContacter ?? null],
         );
         return rows[0];
       } catch (e) {
@@ -121,8 +123,8 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
       if (garde.branche_id && doublon.branche_id && garde.branche_id !== doublon.branche_id) throw new ErreurApi(409, "tiers_autre_branche");
       await ctx.client.query(
         `update tiers set email = coalesce(email, $2), telephone = coalesce(telephone, $3), roles = (select array(select distinct unnest(roles || $4::text[]))), branche_id = coalesce(branche_id, $5),
-           ville = coalesce(ville, $6), source = coalesce(source, $7) where id = $1`,
-        [garde.id, doublon.email, doublon.telephone, doublon.roles, doublon.branche_id, doublon.ville, doublon.source],
+           ville = coalesce(ville, $6), source = coalesce(source, $7), ne_pas_contacter = ne_pas_contacter or $8 where id = $1`,
+        [garde.id, doublon.email, doublon.telephone, doublon.roles, doublon.branche_id, doublon.ville, doublon.source, doublon.ne_pas_contacter],
       );
       await ctx.client.query("update tiers set fusionne_vers = $2, archive = true, email = null, telephone = null where id = $1", [doublon.id, garde.id]);
       let table = "";
