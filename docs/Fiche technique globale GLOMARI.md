@@ -343,6 +343,7 @@ Toutes ces routes sont limitées en débit, comme celles qui existent déjà. El
 | `commande_web.creee`, `commande_web.confirmee`, `commande_web.payee`, `commande_web.facturee`, `commande_web.expiree`, `commande_web.annulee` | Cycle de la commande en ligne (confirmée : paiement à la livraison, colis créé) | Lots 1 et 2 |
 | `stock.disponibilite_modifiee`, `catalogue.article_modifie` | Stock vendable ou article modifié | Lot 1 |
 | `precommande.inscription_validee`, `precommande.seuil_atteint`, `precommande.arrivage_etape`, `precommande.arrivage_recu`, `precommande.soldee`, `precommande.acompte_conserve`, `precommande.a_rembourser`, `precommande.campagne_annulee`, `precommande.campagne_livree` | Cycle des précommandes ; sans nom ni téléphone, le destinataire se retrouve par la référence | Lot 3A |
+| `colis.cree`, `colis.etape` | Colis créé ; étape enregistrée (statut) ; sans téléphone ni adresse | Lot 4A |
 
 Les webhooks sont livrés au moins une fois. `glomari-web` dédoublonne par l'identifiant d'événement.
 
@@ -533,6 +534,17 @@ Tests avec implémentations factices ; aucun appel réseau réel.
 ```
 
 Recette : 80 % des questions courantes réglées sans humain sur 100 conversations test (objectif du BP).
+
+**État au 23 novembre 2026.** Le lot 4 est découpé en trois parties (décision du 23 novembre 2026).
+
+- **Partie A (messages et avis publiés, points 1, 2 et 6) livrée** :
+  - fichiers : migration `0051_messages_avis.sql`, `src/messages.ts` (le nom `envoi_messages.ts` du prompt n'est pas retenu : pas de tiret bas dans les noms de fichiers), `public/messages.js`, `public/evaluer.js` ; spécification `specs/005-messages-avis/` ;
+  - les messages naissent des événements publiés (réactions appelées par `publierEvenement`), partent chaque minute entre 7 h et 21 h, trois tentatives au plus ; seul le prestataire factice existe ;
+  - « prêt à retirer » seulement pour une commande en agence de voyage ou en point relais ;
+  - la demande d'avis porte sur toute la commande et se note article par article ; les colis de la Marketplace étant créés sans leur facture, le client et les articles se lisent par la commande en ligne ;
+  - avis publics : `GET /marketplace/:org/produits/:id/avis`, moyenne dans le catalogue.
+- **Partie B (comptes clients en ligne par code SMS, point 3)** : à faire.
+- **Partie C (assistant GLOMARI Care et studio des fiches produits, points 4 et 5)** : à faire.
 
 ### Lot 5 · Réseau et indicateurs (phase 2, 2029)
 

@@ -9,6 +9,29 @@
     if (!r.ok) return fin("Ce lien n'est pas valide.", "etat rouge");
     const d = await r.json();
     if (d.repondu) return fin("Votre avis a déjà été reçu. Merci.");
+    const envoyer = async (corps) => {
+      const s = await fetch(`/evaluer/${code}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(corps) }).catch(() => null);
+      fin(s?.ok ? "Merci pour votre avis." : "L'envoi a échoué. Réessayez.", s?.ok ? "etat vert" : "etat rouge");
+    };
+    // Une commande se note article par article ; chaque note est facultative, au moins une est demandée.
+    if (d.articles) {
+      const blocs = d.articles.map((a, n) => {
+        const choix = el("fieldset", { class: "notes" }, el("legend", {}, a.nom));
+        for (let i = 5; i >= 1; i -= 1) choix.append(el("label", { class: "choix" }, el("input", { type: "radio", name: `note${n}`, value: String(i) }), ` ${i} sur 5`));
+        choix.append(el("label", {}, "Commentaire (facultatif). N'indiquez pas de numéro ni d'adresse.", el("textarea", { name: `commentaire${n}`, rows: "3", maxlength: "2000" })));
+        return choix;
+      });
+      const erreur = el("p", { class: "etat rouge", hidden: "" }, "Donnez une note à au moins un article.");
+      const f = el("form", {}, ...blocs, erreur, el("button", { type: "submit" }, "Envoyer"));
+      f.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const v = new FormData(f);
+        const notes = d.articles.map((a, n) => ({ produitId: a.produit_id, note: Number(v.get(`note${n}`)), commentaire: v.get(`commentaire${n}`) || undefined })).filter((x) => x.note);
+        if (!notes.length) { erreur.hidden = false; return; }
+        await envoyer({ notes });
+      });
+      return zone.replaceChildren(el("h1", {}, d.cible), el("p", {}, "Notez les articles reçus, de 1 à 5."), f);
+    }
     const notes = el("fieldset", { class: "notes" }, el("legend", {}, "Votre note"));
     for (let i = 5; i >= 1; i -= 1) notes.append(el("label", { class: "choix" }, el("input", { type: "radio", name: "note", value: String(i), required: "" }), ` ${i} sur 5`));
     const f = el("form", {}, notes, el("label", {}, "Commentaire (facultatif). N'indiquez pas de numéro ni d'adresse.", el("textarea", { name: "commentaire", rows: "4", maxlength: "2000" })),
@@ -16,8 +39,7 @@
     f.addEventListener("submit", async (e) => {
       e.preventDefault();
       const v = new FormData(f);
-      const s = await fetch(`/evaluer/${code}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ note: Number(v.get("note")), commentaire: v.get("commentaire") || undefined, temoignage: v.get("temoignage") === "on" }) }).catch(() => null);
-      fin(s?.ok ? "Merci pour votre avis." : "L'envoi a échoué. Réessayez.", s?.ok ? "etat vert" : "etat rouge");
+      await envoyer({ note: Number(v.get("note")), commentaire: v.get("commentaire") || undefined, temoignage: v.get("temoignage") === "on" });
     });
     zone.replaceChildren(el("h1", {}, d.cible), f);
   } catch { fin("Connexion impossible. Réessayez.", "etat rouge"); }

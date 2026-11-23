@@ -1,4 +1,5 @@
 import pg from "pg";
+import { prestataireMessagesFactice } from "./messages.js";
 import { prestataireFactice } from "./paiementenligne.js";
 import { creerServeur } from "./serveur.js";
 import { generateurClaude } from "./studio.js";
@@ -23,6 +24,8 @@ const app = await creerServeur(pool, {
     : undefined,
   // Essai privé seulement : tant que la direction n'a pas choisi le prestataire réel.
   prestatairesPaiement: process.env.ERP_PAIEMENT_FACTICE_SECRET ? [prestataireFactice(process.env.ERP_PAIEMENT_FACTICE_SECRET)] : [],
+  // Essai privé seulement : les messages sont marqués envoyés sans partir, tant que le prestataire réel n'est pas choisi.
+  prestataireMessages: process.env.ERP_MESSAGES_FACTICE === "1" ? prestataireMessagesFactice() : undefined,
   debitCanal: {
     commandes: process.env.ERP_CANAL_COMMANDES_PAR_MINUTE ? Number(process.env.ERP_CANAL_COMMANDES_PAR_MINUTE) : undefined,
     paiements: process.env.ERP_CANAL_PAIEMENTS_PAR_MINUTE ? Number(process.env.ERP_CANAL_PAIEMENTS_PAR_MINUTE) : undefined,

@@ -53,6 +53,7 @@ import { enregistrerPrecommandes, expirerPrecommandes } from "./precommandes.js"
 import { enregistrerAcomptes } from "./acomptes.js";
 import { enregistrerDepotVente } from "./depotvente.js";
 import { enregistrerCouverture } from "./couverture.js";
+import { enregistrerMessages, type PrestataireMessages } from "./messages.js";
 import { enregistrerPilotage } from "./pilotage.js";
 import { enregistrerRh } from "./rh.js";
 import { enregistrerTresorerie } from "./tresorerie.js";
@@ -109,6 +110,8 @@ export interface OptionsServeur {
   webhooksAuto?: boolean;
   /** Prestataires de paiement Mobile Money ; sans eux, le paiement en ligne est indisponible. */
   prestatairesPaiement?: PrestatairePaiement[];
+  /** Prestataire SMS et WhatsApp ; sans lui, les messages aux clients attendent dans la file. */
+  prestataireMessages?: PrestataireMessages;
   /** Commandes et lancements de paiement par minute et par adresse IP sur la Marketplace (20 et 10 par défaut). */
   debitCanal?: { commandes?: number; paiements?: number };
 }
@@ -747,8 +750,8 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
     protege(req, async (ctx) => {
       await exiger(ctx, "tiers.voir");
       const t = await exigerTiersVisible(ctx, req.params.id, "tiers.voir");
-      const { id, type, nom, email, telephone, langue, roles, entite_origine_id, archive, cree_le, branche_id } = t;
-      return { id, type, nom, email, telephone, langue, roles, entite_origine_id, archive, cree_le, branche_id };
+      const { id, type, nom, email, telephone, langue, roles, entite_origine_id, archive, cree_le, branche_id, ne_pas_contacter } = t;
+      return { id, type, nom, email, telephone, langue, roles, entite_origine_id, archive, cree_le, branche_id, ne_pas_contacter };
     }),
   );
 
@@ -822,6 +825,7 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
   enregistrerAcomptes(app, { protege, exigerSurEntite, exiger });
   enregistrerDepotVente(app, { protege, exigerSurEntite, exiger });
   enregistrerCouverture(app, pool, { protege, exigerSurEntite, exiger }, taches);
+  enregistrerMessages(app, pool, { protege, exigerSurEntite, exiger }, options.urlPublique, options.prestataireMessages);
   enregistrerRecouvrement(app, { protege, exigerSurEntite, exiger });
   enregistrerProspection(app, pool, { protege, exigerSurEntite, exiger });
   enregistrerSocle(app, { protege, exigerSurEntite, exiger });
@@ -834,7 +838,10 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
       for (const r of rows) await executerTaches(r.id);
     };
     const minuterie = setInterval(() => { tour().catch((e) => app.log.error(e, "tâches planifiées")); }, 3600000);
-    const envoi = setInterval(() => { app.pousserWebhooks?.().catch((e: unknown) => app.log.error(e, "webhooks")); }, 60000);
+    const envoi = setInterval(() => {
+      app.pousserWebhooks?.().catch((e: unknown) => app.log.error(e, "webhooks"));
+      app.pousserMessages().catch((e: unknown) => app.log.error(e, "messages aux clients"));
+    }, 60000);
     // Une réservation de commande en ligne, ou une place de précommande en attente d'acompte, dure 30 minutes :
     // la tâche horaire la laisserait bloquer la caisse ou la campagne trop longtemps.
     const expiration = setInterval(() => {

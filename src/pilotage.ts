@@ -55,6 +55,7 @@ export async function creerColis(ctx: Contexte, b: NouveauColis): Promise<Record
     [ctx.organisationId, b.entiteId, numero, randomBytes(16).toString("base64url"), code, b.destinataire, b.telephone ?? null, b.adresse ?? null, b.zoneId ?? null, b.transporteur ?? null, b.documentId ?? null, b.aEncaisser ?? 0, prevu],
   );
   await ctx.client.query("insert into etapes_colis (organisation_id, colis_id, statut, auteur_id) values ($1, $2, 'prepare', $3)", [ctx.organisationId, x.id, ctx.utilisateurId]);
+  await publierEvenement(ctx.client, "colis.cree", { id: x.id, numero: x.numero });
   return x;
 }
 
@@ -334,6 +335,7 @@ export function enregistrerPilotage(app: FastifyInstance, pool: pg.Pool, outils:
       if (statut === "echec" && !note) throw new ErreurApi(400, "motif_obligatoire");
       await ctx.client.query("update colis set statut = $2 where id = $1", [c.id, statut]);
       await etape(ctx, c.id, statut, note);
+      await publierEvenement(ctx.client, "colis.etape", { id: c.id, statut });
       return { statut };
     }),
   );

@@ -418,27 +418,78 @@ export function enregistrerCommerce(app: FastifyInstance, pool: pg.Pool, outils:
       return fn(c, d, org);
     }).catch((e) => { if (e.code === "22P02") throw new ErreurApi(404, "introuvable"); throw e; });
   };
+  /**
+   * Les articles d'une demande d'avis sur une commande : ceux de la commande en ligne du colis, sinon de sa facture
+   * (colis saisi à la main), sinon de la vente de caisse.
+   */
+  const articlesCommande = async (c: Client, d: Record<string, any>): Promise<{ produit_id: string; nom: string }[]> => (await c.query(
+    `select p.id as produit_id, p.nom from produits p where p.id in (
+       select l.produit_id from lignes_commande_web l join commandes_web w on w.id = l.commande_id where $1::text = 'colis' and w.colis_id = $2
+       union
+       select l.produit_id from lignes_vente l join colis k on k.document_id = l.document_id
+       where $1::text = 'colis' and k.id = $2 and l.produit_id is not null and not exists (select 1 from commandes_web w where w.colis_id = $2)
+       union
+       select l.produit_id from lignes_comptoir l where $1::text = 'vente_comptoir' and l.vente_id = $2)
+     order by p.nom`,
+    [d.source_type, d.source_id],
+  )).rows;
   app.get<{ Params: { code: string } }>("/evaluer/:code", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (req) =>
-    parCode(req.params.code, async (_c, d) => ({ cible: d.cible, repondu: !!d.repondu_le })),
+    parCode(req.params.code, async (c, d) => ({
+      cible: d.cible, repondu: !!d.repondu_le, ...(d.cible_type === "commande" ? { articles: await articlesCommande(c, d) } : {}),
+    })),
   );
-  /** Une note basse ouvre un ticket, sans jamais être masquée pour cette raison. */
-  app.post<{ Params: { code: string }; Body: { note: number; commentaire?: string; temoignage?: boolean } }>("/evaluer/:code", {
+  /** Une note basse ouvre un ticket, sans jamais être masquée pour cette raison. Une commande se note article par article. */
+  app.post<{
+    Params: { code: string };
+    Body: { note?: number; commentaire?: string; temoignage?: boolean; notes?: { produitId: string; note: number; commentaire?: string }[] };
+  }>("/evaluer/:code", {
     config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
-    schema: { body: { type: "object", required: ["note"], properties: { note: { type: "integer", minimum: 1, maximum: 5 }, commentaire: { type: "string", maxLength: 2000 }, temoignage: { type: "boolean" } } } },
+    schema: {
+      body: {
+        type: "object",
+        properties: {
+          note: { type: "integer", minimum: 1, maximum: 5 }, commentaire: { type: "string", maxLength: 2000 }, temoignage: { type: "boolean" },
+          notes: {
+            type: "array", minItems: 1, maxItems: 50,
+            items: {
+              type: "object", additionalProperties: false, required: ["produitId", "note"],
+              properties: { produitId: uuid, note: { type: "integer", minimum: 1, maximum: 5 }, commentaire: { type: "string", maxLength: 2000 } },
+            },
+          },
+        },
+      },
+    },
   }, async (req, reponse) => {
     await parCode(req.params.code, async (c, d, org) => {
       if (d.repondu_le) throw new ErreurApi(409, "deja_repondu");
       const b = req.body;
-      await c.query(
-        "insert into retours_clients (organisation_id, demande_id, note, commentaire, temoignage, statut) values ($1, $2, $3, $4, $5, $6)",
-        [org, d.id, b.note, b.commentaire?.trim() || null, b.temoignage ?? false, aModerer(b.commentaire) ? "a_moderer" : "publie"],
-      );
+      const statut = (commentaire?: string) => (aModerer(commentaire) ? "a_moderer" : "publie");
+      let plusBasse: number;
+      if (d.cible_type === "commande") {
+        if (!b.notes || b.note !== undefined || new Set(b.notes.map((n) => n.produitId)).size !== b.notes.length) throw new ErreurApi(400, "donnees_invalides");
+        const articles = new Set((await articlesCommande(c, d)).map((a) => a.produit_id));
+        if (b.notes.some((n) => !articles.has(n.produitId))) throw new ErreurApi(409, "article_hors_commande");
+        for (const n of b.notes) {
+          await c.query(
+            "insert into retours_clients (organisation_id, demande_id, produit_id, note, commentaire, temoignage, statut) values ($1, $2, $3, $4, $5, false, $6)",
+            [org, d.id, n.produitId, n.note, n.commentaire?.trim() || null, statut(n.commentaire)],
+          );
+        }
+        plusBasse = Math.min(...b.notes.map((n) => n.note));
+      } else {
+        if (b.note === undefined || b.notes) throw new ErreurApi(400, "donnees_invalides");
+        await c.query(
+          "insert into retours_clients (organisation_id, demande_id, note, commentaire, temoignage, statut) values ($1, $2, $3, $4, $5, $6)",
+          [org, d.id, b.note, b.commentaire?.trim() || null, b.temoignage ?? false, statut(b.commentaire)],
+        );
+        plusBasse = b.note;
+      }
       await c.query("update demandes_retour set repondu_le = now() where id = $1", [d.id]);
-      if (b.note <= 2 && d.tiers_id) {
+      if (plusBasse <= 2 && d.tiers_id) {
         const numero = await prochainNumero(c, `TIC-${new Date().getFullYear()}`);
         await c.query(
           "insert into tickets (organisation_id, entite_id, numero, tiers_id, sujet, canal, priorite, echeance) values ($1, $2, $3, $4, $5, 'site', 'haute', now() + interval '48 hours')",
-          [org, d.entite_id, numero, d.tiers_id, `Avis de ${b.note}/5 : ${d.cible}`.slice(0, 200)],
+          [org, d.entite_id, numero, d.tiers_id, `Avis de ${plusBasse}/5 : ${d.cible}`.slice(0, 200)],
         );
       }
     });
@@ -450,10 +501,15 @@ export function enregistrerCommerce(app: FastifyInstance, pool: pg.Pool, outils:
       const liste = await ids(ctx, "retours.voir");
       const [avis, stats] = await Promise.all([
         ctx.client.query(
-          `select r.id, r.note, r.commentaire, r.statut, r.reponse, r.temoignage, r.motif_moderation, r.cree_le, d.cible, d.cible_type, d.source_type from retours_clients r join demandes_retour d on d.id = r.demande_id
+          // Un avis sur un article d'une commande porte le nom de l'article.
+          `select r.id, r.note, r.commentaire, r.statut, r.reponse, r.temoignage, r.motif_moderation, r.cree_le, coalesce(p.nom, d.cible) as cible,
+             case when r.produit_id is null then d.cible_type else 'produit' end as cible_type, d.source_type
+           from retours_clients r join demandes_retour d on d.id = r.demande_id left join produits p on p.id = r.produit_id
            where d.entite_id = any($1::uuid[]) order by r.statut = 'a_moderer' desc, r.cree_le desc limit 500`, [liste]),
         ctx.client.query(
-          `select d.cible_type, d.cible, round(avg(r.note), 1)::float as moyenne, count(*)::int as avis from retours_clients r join demandes_retour d on d.id = r.demande_id
+          `select case when r.produit_id is null then d.cible_type else 'produit' end as cible_type, coalesce(p.nom, d.cible) as cible,
+             round(avg(r.note), 1)::float as moyenne, count(*)::int as avis
+           from retours_clients r join demandes_retour d on d.id = r.demande_id left join produits p on p.id = r.produit_id
            where d.entite_id = any($1::uuid[]) and r.statut = 'publie' group by 1, 2 order by moyenne limit 100`, [liste]),
       ]);
       return { avis: avis.rows, moyennes: stats.rows };

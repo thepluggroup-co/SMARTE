@@ -35,11 +35,15 @@ export async function definirActeur(client: Client, utilisateurId: string): Prom
   await client.query("select set_config('app.utilisateur_id', $1, true)", [utilisateurId]);
 }
 
+/** Ce que d'autres modules font d'un événement, dans la même transaction (les messages aux clients, par exemple). */
+export const reactionsEvenements: ((c: Client, type: string, charge: Record<string, unknown>) => Promise<void>)[] = [];
+
 export async function publierEvenement(client: Client, type: string, charge: object): Promise<void> {
   await client.query(
     "insert into evenements (organisation_id, type, charge) values (org_courante(), $1, $2)",
     [type, JSON.stringify(charge)],
   );
+  for (const reagir of reactionsEvenements) await reagir(client, type, charge as Record<string, unknown>);
 }
 
 /** Une connexion à la base ne traite qu'une requête à la fois : on les enchaîne au lieu de les lancer ensemble. */
