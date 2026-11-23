@@ -2,6 +2,7 @@
 
 -- Réglage d'un type de message pour une branche ; sans ligne, le défaut du code s'applique.
 create table reglages_messages (
+  id uuid primary key default gen_random_uuid(),
   organisation_id uuid not null,
   branche_id uuid not null,
   type text not null check (type in ('colis_cree', 'colis_en_livraison', 'colis_pret_retrait', 'colis_livre', 'acompte_confirme', 'etape_arrivage',
@@ -10,7 +11,7 @@ create table reglages_messages (
   canal text not null check (canal in ('sms', 'whatsapp')),
   modifie_par uuid not null,
   modifie_le timestamptz not null default now(),
-  primary key (organisation_id, branche_id, type),
+  unique (organisation_id, branche_id, type),
   foreign key (organisation_id, branche_id) references entites(organisation_id, id),
   foreign key (organisation_id, modifie_par) references utilisateurs(organisation_id, id)
 );

@@ -376,8 +376,10 @@ export function enregistrerMessages(app: FastifyInstance, pool: pg.Pool, outils:
   const { protege, exigerSurEntite } = outils;
   app.decorate("pousserMessages", (maintenant?: Date, organisationId?: string) => pousserMessages(pool, prestataire, urlPublique, maintenant, organisationId));
 
-  /** Droit d'abord, puis la branche doit gérer du stock : jamais de messages pour GTA. */
+  /** Une branche de l'organisation, puis le droit, puis le module de stock : jamais de messages pour GTA. */
   const exigerBranche = async (ctx: Contexte, brancheId: string, permissions: ("care.voir" | "care.gerer" | "facturation.administrer")[]) => {
+    const { rows: [e] } = await ctx.client.query("select 1 from entites where id = $1", [brancheId]);
+    if (!e) throw new ErreurApi(404, "introuvable");
     let ok = false;
     for (const p of permissions) if (await aPermissionSurEntite(ctx.client, ctx.utilisateurId, p, brancheId)) { ok = true; break; }
     if (!ok) throw new ErreurApi(403, "permission_refusee");

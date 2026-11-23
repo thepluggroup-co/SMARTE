@@ -116,6 +116,6 @@ describe("réglages et journal des messages", () => {
 
     const ailleurs = await env.nouvelleOrganisation();
     expect((await env.api("POST", `/messages/${sans!.id}/renvoi`, ailleurs.jeton, {})).statut).toBe(404);
-    expect((await env.api("GET", `/messages?brancheId=${b.G}`, ailleurs.jeton)).statut).toBe(403);
+    expect((await env.api("GET", `/messages?brancheId=${b.G}`, ailleurs.jeton)).statut).toBe(404);
   });
 });

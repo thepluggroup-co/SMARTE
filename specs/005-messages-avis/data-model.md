@@ -35,7 +35,7 @@ Réglage d'un type de message pour une branche. Sans ligne, le défaut du tablea
 | `modifie_par` | uuid | FK `utilisateurs` |
 | `modifie_le` | timestamptz | défaut `now()` |
 
-- Clé primaire `(organisation_id, branche_id, type)` ; audit.
+- Identifiant `id` (exigé par la trace d'audit), unique `(organisation_id, branche_id, type)` ; audit.
 - Droits `erp_app` : select, insert, update.
 
 ## envois_messages (nouvelle)
