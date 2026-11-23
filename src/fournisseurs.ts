@@ -1,5 +1,6 @@
 import { exigerSeparation } from "./permissions.js";
 import type { FastifyInstance } from "fastify";
+import { annulerImputations, imputerAcomptes } from "./acomptes.js";
 import { calculFiscal, bilan, CATEGORIES_IMMO, compteDeResultat, dotationAnnee, fluxDeTresorerie, LIBELLES, type LigneBalance } from "./etats.js";
 import { celluleCsv } from "./comptabilite.js";
 import { prochainNumero } from "./formations.js";
@@ -94,7 +95,10 @@ export function enregistrerFournisseurs(app: FastifyInstance, outils: Outils): v
       `select f.*, t.nom as fournisseur,
          coalesce((select sum(p.montant) from paiements_fournisseur p where p.facture_id = f.id and p.annule_le is null), 0)::int8 as paye,
          (select c.total from commandes_achat c where c.id = f.commande_id)::int8 as commande_total,
-         (select sum(l.quantite_recue * l.prix_unitaire) from lignes_achat l where l.commande_id = f.commande_id)::float as recu
+         -- En devise, le reçu se valorise au taux figé de la commande, ligne par ligne, comme son total : pas d'écart d'arrondi.
+         (select sum(case when k.devise is null then l.quantite_recue * l.prix_unitaire
+            else round(l.quantite_recue * coalesce(l.quantite_unite / nullif(l.quantite, 0), 1) * l.prix_devise * k.taux) end)
+          from lignes_achat l join commandes_achat k on k.id = l.commande_id where l.commande_id = f.commande_id)::float as recu
        from factures_fournisseur f join tiers t on t.id = f.fournisseur_id where f.id = $1 for update of f`,
       [id],
     );
@@ -145,7 +149,12 @@ export function enregistrerFournisseurs(app: FastifyInstance, outils: Outils): v
         "update factures_fournisseur set statut = 'validee', numero = $2, motif_ecart = $3, valide_par = $4, valide_le = now() where id = $1 returning *",
         [f.id, numero, req.body?.motifEcart ?? null, ctx.utilisateurId],
       );
-      return rows[0];
+      // Les acomptes versés sur le bon de commande s'imputent ici, une seule fois, sans nouvelle sortie d'argent.
+      const acomptes = await imputerAcomptes(ctx.client, ctx.organisationId, rows[0], ctx.utilisateurId).catch((e) => {
+        if ((e as { code?: string }).code === "AF001") throw new ErreurApi(409, "acompte_insuffisant");
+        throw e;
+      });
+      return { ...rows[0], acomptes_imputes: acomptes };
     }),
   );
 
@@ -155,7 +164,12 @@ export function enregistrerFournisseurs(app: FastifyInstance, outils: Outils): v
     protege(req, async (ctx) => {
       const f = await lire(ctx, req.params.id, "compta.valider");
       if (f.statut === "annulee") throw new ErreurApi(409, "facture_deja_traitee");
-      if (f.paye > 0) throw new ErreurApi(409, "facture_payee");
+      // Un vrai paiement interdit l'annulation ; des acomptes imputés, eux, redeviennent disponibles.
+      const { rows: [reel] } = await ctx.client.query(
+        "select coalesce(sum(montant), 0)::int8 as s from paiements_fournisseur where facture_id = $1 and annule_le is null and acompte_id is null", [f.id],
+      );
+      if (Number(reel.s) > 0) throw new ErreurApi(409, "facture_payee");
+      await annulerImputations(ctx.client, f.id, `Facture annulée : ${req.body.motif}`.slice(0, 500));
       await ctx.client.query("update factures_fournisseur set statut = 'annulee', motif_annulation = $2, annulee_le = now() where id = $1", [f.id, req.body.motif]);
       return { annulee: true };
     }),
@@ -167,6 +181,8 @@ export function enregistrerFournisseurs(app: FastifyInstance, outils: Outils): v
     if (b.montant > f.total_ttc - f.paye) throw new ErreurApi(409, "montant_superieur_au_reste");
     const { rows: [w] } = await ctx.client.query("select *, entite_branche(entite_id) as branche from portefeuilles where id = $1 for update", [b.portefeuilleId]);
     if (!w) throw new ErreurApi(404, "introuvable");
+    // Toute sortie d'argent exige le droit de trésorerie, en plus du droit de valider en comptabilité.
+    await exigerSurEntite(ctx, "tresorerie.gerer", w.entite_id);
     if (w.branche !== (await branche(ctx, f.entite_id))) throw new ErreurApi(409, "transfert_autre_branche");
     if (!w.actif) throw new ErreurApi(409, "portefeuille_inactif");
     const { rows: [{ s }] } = await ctx.client.query("select coalesce(sum(montant), 0)::int8 as s from mouvements_portefeuille where portefeuille_id = $1", [w.id]);
@@ -220,6 +236,8 @@ export function enregistrerFournisseurs(app: FastifyInstance, outils: Outils): v
       if (!p) throw new ErreurApi(404, "introuvable");
       await lire(ctx, p.facture_id, "compta.valider");
       if (p.annule_le) throw new ErreurApi(409, "deja_annule");
+      // Seule l'annulation de la facture rend un acompte imputé.
+      if (p.acompte_id) throw new ErreurApi(409, "imputation_non_annulable");
       await ctx.client.query("update paiements_fournisseur set annule_le = now(), motif_annulation = $2 where id = $1", [p.id, req.body.motif]);
       await ctx.client.query(
         `insert into mouvements_portefeuille (organisation_id, portefeuille_id, type, montant, libelle, source_type, source_id, annule_mouvement_id, auteur_id)

@@ -68,6 +68,7 @@ async function pieces(c: Client, brancheId: string, fin: string, p: Record<strin
   // Une branche initialisée avant les précommandes n'a pas encore ces deux réglages.
   const avances = p.avances_clients ?? PARAMETRES_DE_DEPART.avances_clients!;
   const produitsDivers = p.produits_divers ?? PARAMETRES_DE_DEPART.produits_divers!;
+  const avancesFournisseurs = p.avances_fournisseurs ?? PARAMETRES_DE_DEPART.avances_fournisseurs!;
   const ajout = (x: Proposition) => res.push(x);
 
   const docs = await c.query(
@@ -191,7 +192,7 @@ async function pieces(c: Client, brancheId: string, fin: string, p: Record<strin
     const type = annule ? "paiement_fournisseur_annule" : "paiement_fournisseur";
     const quand = annule ? "x.annule_le" : "x.cree_le";
     const { rows } = await c.query(
-      `select x.id, x.montant, x.reference, w.type as portefeuille, f.fournisseur_id, f.numero, ${annule ? "(x.annule_le at time zone 'Africa/Douala')::date::text" : "x.date_paiement::text"} as date,
+      `select x.id, x.montant, x.reference, x.acompte_id, w.type as portefeuille, f.fournisseur_id, f.numero, ${annule ? "(x.annule_le at time zone 'Africa/Douala')::date::text" : "x.date_paiement::text"} as date,
          (select bool_and(l.compte_numero like '2%') from lignes_facture_fournisseur l where l.facture_id = f.id) as invest
        from paiements_fournisseur x join factures_fournisseur f on f.id = x.facture_id join portefeuilles w on w.id = x.portefeuille_id
        where entite_branche(f.entite_id) = $1 ${annule ? "and x.annule_le is not null" : ""} and (${quand} at time zone 'Africa/Douala')::date <= $2 and ${pas(type, "x.id")} limit 2000`,
@@ -199,9 +200,35 @@ async function pieces(c: Client, brancheId: string, fin: string, p: Record<strin
     );
     for (const r of rows) {
       const s = annule ? -1 : 1;
+      // Un acompte imputé solde l'avance déjà versée au fournisseur : aucun argent ne sort ce jour-là.
+      const imputation = Boolean(r.acompte_id);
       ajout({
-        sourceType: type, sourceId: r.id, journal: r.portefeuille === "especes" ? "CA" : "BQ", date: r.date, libelle: `${annule ? "Annulation du p" : "P"}aiement ${r.numero}`, piece: r.reference,
-        lignes: [...ligne(r.invest ? p.fournisseurs_investissement! : p.fournisseurs!, s * r.montant, r.fournisseur_id), ...ligne(compteMoyen(r.portefeuille), -s * r.montant)],
+        sourceType: type, sourceId: r.id, journal: imputation ? "OD" : r.portefeuille === "especes" ? "CA" : "BQ", date: r.date,
+        libelle: `${annule ? "Annulation du p" : "P"}aiement ${r.numero}${imputation ? " (acompte imputé)" : ""}`, piece: r.reference,
+        lignes: [
+          ...ligne(r.invest ? p.fournisseurs_investissement! : p.fournisseurs!, s * r.montant, r.fournisseur_id),
+          ...ligne(imputation ? avancesFournisseurs : compteMoyen(r.portefeuille), -s * r.montant, imputation ? r.fournisseur_id : null),
+        ],
+      });
+    }
+  }
+  // Acomptes versés aux fournisseurs avant leur facture (règle R5), et leur annulation quand le fournisseur rembourse.
+  for (const annule of [false, true]) {
+    const type = annule ? "acompte_fournisseur_annule" : "acompte_fournisseur";
+    const { rows } = await c.query(
+      `select a.id, a.montant, a.reference, a.fournisseur_id, w.type as portefeuille, k.numero,
+         ${annule ? "(a.annule_le at time zone 'Africa/Douala')::date::text" : "a.date_versement::text"} as date
+       from acomptes_fournisseur a join portefeuilles w on w.id = a.portefeuille_id join commandes_achat k on k.id = a.commande_id
+       where entite_branche(w.entite_id) = $1 ${annule ? "and a.annule_le is not null" : ""}
+         and ${annule ? "(a.annule_le at time zone 'Africa/Douala')::date" : "a.date_versement"} <= $2 and ${pas(type, "a.id")} limit 2000`,
+      [brancheId, fin],
+    );
+    for (const r of rows) {
+      const s = annule ? -1 : 1;
+      ajout({
+        sourceType: type, sourceId: r.id, journal: r.portefeuille === "especes" ? "CA" : "BQ", date: r.date,
+        libelle: `${annule ? "Annulation de l'a" : "A"}compte ${r.numero}`, piece: r.reference,
+        lignes: [...ligne(avancesFournisseurs, s * r.montant, r.fournisseur_id), ...ligne(compteMoyen(r.portefeuille), -s * r.montant)],
       });
     }
   }

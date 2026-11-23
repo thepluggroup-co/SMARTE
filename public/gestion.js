@@ -457,7 +457,8 @@ function exporterCommande(format, c) {
 }
 
 /** Lignes d'un fichier Excel ou CSV : code ou nom d'article, quantité, prix d'achat, poids, prix de vente. */
-function lignesDepuisTableur(rangs, produits) {
+/** En devise, le prix garde quatre décimales ; en FCFA, il s'arrondit au franc. */
+function lignesDepuisTableur(rangs, produits, enDevise = false) {
   const norm = (t) => String(t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
   const entetes = (rangs[0] || []).map(norm);
   const pris = new Set();
@@ -484,7 +485,7 @@ function lignesDepuisTableur(rangs, produits) {
     const quantite = nombreSaisi(r[iQte]), prix = nombreSaisi(r[iPrix]);
     if (!quantite || quantite <= 0 || prix === null || prix < 0) { invalides.push(`${libelle} (ligne ${numero})`); return; }
     const poids = iPoids >= 0 ? nombreSaisi(r[iPoids]) : null, vente = iVente >= 0 ? nombreSaisi(r[iVente]) : null;
-    lignes.push({ produitId: p.id, quantite, prix: Math.round(prix), poids: poids ?? "", prixVente: vente === null ? undefined : Math.round(vente) });
+    lignes.push({ produitId: p.id, quantite, prix: enDevise ? Math.round(prix * 10000) / 10000 : Math.round(prix), poids: poids ?? "", prixVente: vente === null ? undefined : Math.round(vente) });
   });
   return { lignes, inconnus, invalides };
 }
@@ -496,6 +497,8 @@ function modeleImportAchat(format, produits) {
   else fichierExcel("Modele import achats", "Lignes", lignes, { grasses: [0], largeurs: [16, 30, 10, 26, 12, 26] });
 }
 const PAIEMENT_ACHAT = { non_facture: "Pas encore facturée", non_paye: "Non payée", partiel: "Payée en partie", paye: "Payée" };
+const DEVISES_ACHAT = { "": "FCFA", CNY: "Yuan chinois (CNY)", USD: "Dollar américain (USD)", EUR: "Euro (EUR)" };
+const nombreDevise = (n) => Number(n).toLocaleString("fr-FR", { maximumFractionDigits: 4 });
 const debutMois = () => `${aujourdhui().slice(0, 8)}01`;
 
 async function ecranAchats(message, filtres = {}) {
@@ -511,6 +514,17 @@ async function ecranAchats(message, filtres = {}) {
   const fournisseurs = avecRole(tiers, "fournisseur");
   const transitaires = avecRole(tiers, "transitaire");
   const lignes = h("div");
+  // Devise des prix saisis : FCFA par défaut ; en yuans, dollars ou euros, le serveur convertit au taux du jour de commande.
+  let devise = "";
+  const libelleDevise = () => `(${devise || "FCFA"})`;
+  const noteDevise = h("p", { class: "discret-texte", hidden: true },
+    "Les prix se saisissent dans la devise du fabricant. Le taux du jour de la commande, enregistré par la comptabilité (Devises), les convertit en FCFA ; il est figé à l'approbation. Sans taux enregistré, la commande est refusée.");
+  const changerDevise = (valeur) => {
+    devise = valeur;
+    for (const s of lignes.querySelectorAll(".devise-prix")) s.textContent = libelleDevise();
+    for (const i of lignes.querySelectorAll("[name=prix]")) i.step = devise ? "0.0001" : "1";
+    noteDevise.hidden = !devise;
+  };
   const prixCatalogue = (id) => Number(suivis.find((p) => p.id === id)?.prix_vente) || "";
   const ajouter = (produitId = "", quantite = 1, x = {}) => {
     const vente = h("input", { name: "prixVente", type: "number", min: 0, value: x.prixVente ?? prixCatalogue(produitId || suivis[0]?.id) });
@@ -523,7 +537,8 @@ async function ecranAchats(message, filtres = {}) {
         suivis.map((p) => h("option", { value: p.id, selected: p.id === produitId }, p.nom)))),
       h("label", {}, "Quantité", h("input", { name: "quantite", type: "number", min: 0.001, step: 0.001, value: quantite, required: true })),
       h("label", {}, "Unité", unite),
-      h("label", {}, "Prix d'achat de cette unité (FCFA)", h("input", { name: "prix", type: "number", min: 0, required: true, value: x.prix ?? "" })),
+      h("label", {}, "Prix d'achat de cette unité ", h("span", { class: "devise-prix" }, libelleDevise()),
+        h("input", { name: "prix", type: "number", min: 0, step: devise ? "0.0001" : "1", required: true, value: x.prix ?? "" })),
       h("label", {}, "Poids en kg, facultatif", h("input", { name: "poids", type: "number", min: 0, step: 0.001, value: x.poids ?? "" })),
       h("label", {}, "Prix de vente prévu (FCFA)", vente),
       h("button", { type: "button", class: "discret", onclick: () => { if (lignes.children.length > 1) ligne.remove(); } }, "Retirer"));
@@ -615,9 +630,10 @@ async function ecranAchats(message, filtres = {}) {
       formulaire(async (v, f, zone) => {
         const saisie = [...lignes.children].map((l) => {
           const poids = l.querySelector("[name=poids]").value;
+          const prix = Number(l.querySelector("[name=prix]").value);
           return {
             produitId: l.querySelector("[name=produit]").value, quantite: Number(l.querySelector("[name=quantite]").value),
-            prixUnitaire: Number(l.querySelector("[name=prix]").value), ...(poids ? { poidsKg: Number(poids) } : {}),
+            ...(v.devise ? { prixDevise: prix } : { prixUnitaire: prix }), ...(poids ? { poidsKg: Number(poids) } : {}),
             ...(l.querySelector("[name=unite]").value ? { unite: l.querySelector("[name=unite]").value } : {}),
             ...(l.querySelector("[name=prixVente]").value ? { prixVente: Number(l.querySelector("[name=prixVente]").value) } : {}),
           };
@@ -625,7 +641,7 @@ async function ecranAchats(message, filtres = {}) {
         const importe = v.origine === "import";
         const creer = async (fournisseurId, transitaireId) => {
           const c = await api("POST", "/achats/commandes", {
-            entiteId: v.entiteId, fournisseurId, date: v.date, datePrevue: v.prevue || undefined, lignes: saisie, origine: v.origine,
+            entiteId: v.entiteId, fournisseurId, date: v.date, datePrevue: v.prevue || undefined, lignes: saisie, origine: v.origine, devise: v.devise || undefined,
             acheteurId: v.acheteurId || undefined, referenceFournisseur: v.reference.trim() || undefined, paysOrigine: v.pays.trim() || undefined,
             ...(importe ? { transitaireId, modeTransport: v.mode || undefined, volumeM3: v.volume ? Number(v.volume) : undefined } : {}),
           });
@@ -651,12 +667,15 @@ async function ecranAchats(message, filtres = {}) {
         champ("Pays d'origine, facultatif", { name: "pays" }),
         choix("entiteId", "Entrepôt de réception", entites),
         champ("Date de la commande", { name: "date", type: "date", value: aujourdhui(), required: true }),
-        champ("Arrivée prévue", { name: "prevue", type: "date" })),
+        champ("Arrivée prévue", { name: "prevue", type: "date" }),
+        h("label", {}, "Devise des prix", h("select", { name: "devise", onchange: (e) => changerDevise(e.target.value) },
+          Object.entries(DEVISES_ACHAT).map(([code, nom]) => h("option", { value: code }, nom))))),
+        noteDevise,
         blocImport,
         lignes,
         h("p", {}, h("button", { type: "button", class: "discret", onclick: () => ajouter() }, "Ajouter une ligne")),
         h("details", {}, h("summary", {}, "Importer les lignes depuis un fichier Excel ou CSV"),
-          h("p", { class: "discret-texte" }, "Colonnes : code article (ou nom), quantité, prix d'achat unitaire, et si vous les avez, poids et prix de vente prévu. Les articles doivent exister dans le catalogue. Les lignes importées remplacent celles du formulaire ; vous les vérifiez avant d'enregistrer."),
+          h("p", { class: "discret-texte" }, "Colonnes : code article (ou nom), quantité, prix d'achat unitaire (dans la devise choisie ci-dessus), et si vous les avez, poids et prix de vente prévu en FCFA. Les articles doivent exister dans le catalogue. Les lignes importées remplacent celles du formulaire ; vous les vérifiez avant d'enregistrer."),
           h("div", { class: "actions" },
             h("button", { type: "button", class: "discret", onclick: () => modeleImportAchat("excel", suivis) }, "Modèle Excel"),
             h("button", { type: "button", class: "discret", onclick: () => modeleImportAchat("csv", suivis) }, "Modèle CSV")),
@@ -664,7 +683,7 @@ async function ecranAchats(message, filtres = {}) {
             const fichier = e.target.files[0];
             if (!fichier) return;
             try {
-              const r = lignesDepuisTableur(await lireTableur(fichier), suivis);
+              const r = lignesDepuisTableur(await lireTableur(fichier), suivis, Boolean(devise));
               if (r.erreur || !r.lignes.length) {
                 compteRendu.replaceChildren(h("div", { class: "erreur", role: "alert" }, r.erreur || "Aucune ligne utilisable dans ce fichier.",
                   ...[...(r.inconnus || []).length ? [h("br"), `Introuvables dans le catalogue : ${r.inconnus.join(", ")}.`] : [], ...(r.invalides || []).length ? [h("br"), `Quantité ou prix illisible : ${r.invalides.join(", ")}.`] : []]));
@@ -685,15 +704,54 @@ async function ecranAchats(message, filtres = {}) {
   );
 }
 
+/** Acomptes versés au fournisseur avant sa facture : ils s'imputent seuls à la validation de la facture liée. */
+function blocAcomptes(c, portefeuilles, verse, relire) {
+  const a = c.acomptes;
+  const tresorier = droits.includes("tresorerie.gerer");
+  return h("div", { class: "carte pas-imprimer" }, h("h2", {}, "Acomptes au fournisseur"),
+    h("p", {}, `Versé ${fcfa(a.verse)} · Imputé sur facture ${fcfa(a.impute)} · Disponible ${fcfa(a.disponible)}`),
+    a.liste.length ? a.liste.map((x) => h("div", { class: "apprenant" },
+      h("div", { class: "ligne" }, h("span", { class: "nom" }, `${dateFr(x.date_versement)} · ${fcfa(x.montant)}`),
+        x.annule_le ? h("span", { class: "pastille retard" }, "Annulé")
+          : h("span", { class: x.disponible ? "pastille attente" : "pastille ok" }, x.disponible ? `Disponible ${fcfa(x.disponible)}` : "Imputé")),
+      h("div", { class: "discret-texte" }, `${x.portefeuille}${x.reference ? ` · ${x.reference}` : ""}`
+        + `${x.devise ? ` · ${nombreDevise(x.montant_devise)} ${x.devise} au taux de ${nombreDevise(x.taux)} FCFA` : ""}${x.annule_le ? ` · annulé : ${x.motif_annulation}` : ""}`),
+      // Seul un acompte encore entier s'annule : une part imputée ne revient que par l'annulation de la facture.
+      tresorier && !x.annule_le && x.disponible === x.montant ? h("details", {}, h("summary", {}, "Annuler cet acompte (le fournisseur a remboursé)"), formulaire(async (v) => {
+        await api("POST", `/achats/acomptes/${x.id}/annulation`, { motif: v.motif.trim() });
+        relire("Acompte annulé : l'argent est revenu dans le portefeuille.");
+      }, [champ("Motif (obligatoire)", { name: "motif", required: true, minlength: 5 })], "Confirmer l'annulation")) : null))
+      : h("p", { class: "discret-texte" }, "Aucun acompte versé."),
+    h("p", { class: "discret-texte" }, "Un acompte s'impute de lui-même sur la facture du fournisseur liée à cette commande, quand elle est validée en comptabilité. Il n'est jamais compté deux fois."),
+    verse ? h("details", {}, h("summary", {}, "Verser un acompte"), portefeuilles.length ? formulaire(async (v) => {
+      await api("POST", `/achats/commandes/${c.id}/acomptes`, {
+        portefeuilleId: v.portefeuilleId, montant: Number(v.montant), date: v.date, reference: v.reference.trim() || undefined,
+        ...(v.deviseAcompte ? { devise: v.deviseAcompte, montantDevise: Number(v.montantDevise), taux: Number(v.taux) } : {}),
+      });
+      relire("Acompte versé : la sortie d'argent est enregistrée dans le portefeuille.");
+    }, [h("div", { class: "grille" },
+      choix("portefeuilleId", "Payé depuis", portefeuilles.map((w) => [w.id, `${w.nom} (solde ${fcfa(w.solde)})`])),
+      champ(`Montant en FCFA (au plus ${fcfa(Math.max(c.total - a.verse, 0))})`, { name: "montant", type: "number", min: 1, max: Math.max(c.total - a.verse, 1), required: true }),
+      champ("Date du versement", { name: "date", type: "date", value: aujourdhui(), required: true }),
+      champ("Référence du virement, facultatif", { name: "reference", maxlength: 200 }),
+      choix("deviseAcompte", "Montant aussi en devise, facultatif", Object.entries(DEVISES_ACHAT).map(([code, nom]) => [code, code ? nom : "Non"])),
+      champ("Montant en devise", { name: "montantDevise", type: "number", min: 0.01, step: 0.01 }),
+      champ("Taux appliqué par la banque (FCFA pour 1)", { name: "taux", type: "number", min: 0.0001, step: 0.0001, value: c.taux ?? "" }))], "Verser l'acompte")
+      : h("p", { class: "discret-texte" }, "Aucun portefeuille actif de cette branche n'est accessible.")) : null);
+}
+
 async function ecranCommande(id, message) {
   const c = await api("GET", `/achats/commandes/${id}`);
   const gere = droits.includes("achats.gerer");
   const modifiable = gere && !["recue", "annulee"].includes(c.statut);
-  const [acheteurs, tiers] = await Promise.all([
+  const ouverte = ["approuvee", "recue_partiellement"].includes(c.statut);
+  // Verser un acompte est une sortie d'argent : réservé au droit de trésorerie, sur une commande approuvée.
+  const verse = Boolean(c.acomptes) && ouverte && droits.includes("tresorerie.gerer");
+  const [acheteurs, tiers, portefeuilles] = await Promise.all([
     gere && c.statut === "brouillon" ? api("GET", "/achats/acheteurs") : [],
     modifiable && c.origine === "import" && droits.includes("tiers.voir") ? api("GET", "/tiers") : [],
+    verse ? api("GET", "/portefeuilles") : [],
   ]);
-  const ouverte = ["approuvee", "recue_partiellement"].includes(c.statut);
   const restantes = c.lignes.filter((l) => l.quantite_recue < l.quantite);
   const relire = (m) => ecranCommande(id, m);
   const parcours = [...c.etapes_possibles, "en_stock"];
@@ -714,16 +772,18 @@ async function ecranCommande(id, message) {
       c.origine === "import" ? h("p", {}, `Transitaire : ${c.transitaire ? `${c.transitaire.nom}${c.transitaire.telephone ? `, ${c.transitaire.telephone}` : ""}` : "pas encore choisi"}`
         + `${c.mode_transport ? ` · Transport ${MODES_TRANSPORT[c.mode_transport].toLowerCase()}` : ""}${c.volume_m3 ? ` · ${quantiteFr(c.volume_m3)} m³` : ""}`) : null,
       h("p", {}, `Réception : ${c.entite} · Commandée le ${dateFr(c.date_commande)}${c.date_prevue ? ` · Arrivée prévue le ${dateFr(c.date_prevue)}` : ""}`),
+      c.devise ? h("p", {}, `Prix en ${DEVISES_ACHAT[c.devise] || c.devise} · Taux : 1 ${c.devise} = ${nombreDevise(c.taux)} FCFA (taux du ${dateFr(c.taux_jour)}${c.statut === "brouillon" ? ", repris à chaque modification des lignes" : ", figé"})`) : null,
       c.notes ? h("p", {}, `Notes : ${c.notes}`) : null,
       c.motif_annulation ? h("p", {}, `Annulation : ${c.motif_annulation}`) : null,
       h("div", { class: "defilant" }, h("table", {},
         h("thead", {}, h("tr", {}, ["Article", "Commandé", "Reçu", "Poids (kg)", "Prix unitaire", "Total", "Coût de revient unitaire"].map((t, i) => h("th", { scope: "col", class: i === 6 ? "pas-imprimer" : "" }, t)))),
         h("tbody", {}, c.lignes.map((l) => h("tr", {}, h("td", {}, l.nom, l.unite_achat ? h("div", { class: "discret-texte" }, `Acheté : ${quantiteFr(l.quantite_unite)} ${l.unite_achat} à ${fcfa(l.prix_unite)}`) : null), h("td", { class: "nombre" }, quantiteFr(l.quantite)), h("td", { class: "nombre" }, quantiteFr(l.quantite_recue)),
           h("td", { class: "nombre" }, l.poids_kg === null ? "" : quantiteFr(l.poids_kg)),
-          h("td", { class: "nombre" }, Number(l.prix_unitaire).toLocaleString("fr-FR")), h("td", { class: "nombre" }, Math.round(l.quantite * l.prix_unitaire).toLocaleString("fr-FR")),
+          h("td", { class: "nombre" }, Number(l.prix_unitaire).toLocaleString("fr-FR"), l.prix_devise === null ? null : h("div", { class: "discret-texte" }, `${nombreDevise(l.prix_devise)} ${c.devise}`)),
+          h("td", { class: "nombre" }, Math.round(l.quantite * l.prix_unitaire).toLocaleString("fr-FR")),
           h("td", { class: "nombre pas-imprimer" }, Number(l.cout_revient).toLocaleString("fr-FR"))))))),
       // Le fournisseur ne voit que le montant des marchandises : frais et coût de revient restent internes.
-      h("p", { class: "totaux" }, h("b", {}, `Marchandises : ${fcfa(c.total)}`),
+      h("p", { class: "totaux" }, h("b", {}, `Marchandises : ${fcfa(c.total)}`), c.total_devise === null ? null : ` (${nombreDevise(c.total_devise)} ${c.devise})`,
         h("span", { class: "pas-imprimer" }, h("br"), `Frais d'acheminement : ${fcfa(c.total_frais)}`, h("br"), `Coût total : ${fcfa(c.cout_total)}`))),
     h("div", { class: "carte pas-imprimer" }, h("h2", {}, "Rentabilité prévue sur le marché local"),
       c.statut === "brouillon" ? h("p", { class: "discret-texte" }, "Cette commande en brouillon sert d'étude : rien n'est engagé tant qu'elle n'est pas approuvée. Ajoutez les frais estimés (forfait au kilo ou au mètre cube…) pour une marge réaliste, puis décidez de commander ou d'annuler.") : null,
@@ -801,11 +861,19 @@ async function ecranCommande(id, message) {
     p ? h("div", { class: "carte pas-imprimer" }, h("h2", {}, "Paiement"),
       h("div", { class: "ligne" }, h("span", {}, `Facturé ${fcfa(p.facture)} · Payé ${fcfa(p.paye)} · Reste ${fcfa(p.reste)}`),
         h("span", { class: p.statut === "paye" ? "pastille ok" : "pastille attente" }, PAIEMENT_ACHAT[p.statut])),
-      p.paiements.map((x) => h("div", { class: "discret-texte" }, `${dateFr(x.date_paiement)} · ${fcfa(x.montant)} · ${x.moyen}${x.reference ? ` · ${x.reference}` : ""} · facture ${x.facture}`)),
+      p.paiements.map((x) => h("div", { class: "discret-texte" }, `${dateFr(x.date_paiement)} · ${fcfa(x.montant)} · ${x.acompte_impute ? "acompte imputé" : x.moyen}${x.reference ? ` · ${x.reference}` : ""} · facture ${x.facture}`)),
       p.statut === "non_facture" ? h("p", { class: "discret-texte" }, "La facture du fournisseur, liée à cette commande, et son paiement s'enregistrent en comptabilité. Ils apparaîtront ici.") : null) : null,
+    c.acomptes ? blocAcomptes(c, portefeuilles.filter((w) => w.actif && w.branche === c.branche_id), verse, relire) : null,
+    c.couverture_prevue.length ? h("div", { class: "alerte-caisse pas-imprimer", role: "status" },
+      h("b", {}, "Plus de deux mois de stock une fois la marchandise reçue"),
+      c.couverture_prevue.map((x) => h("div", {}, `${x.categorie} : ${x.couverture_actuelle === null ? "du stock sans vente depuis 90 jours" : `${quantiteFr(x.couverture_actuelle)} jours de ventes aujourd'hui`}, `
+        + `${x.couverture_prevue === null ? "toujours sans vente" : `${quantiteFr(x.couverture_prevue)} jours après réception`}.`)),
+      h("div", { class: "discret-texte" }, "C'est un avertissement : la commande peut quand même être approuvée.")) : null,
     c.statut === "brouillon" && droits.includes("achats.approuver") ? h("div", { class: "actions pas-imprimer" }, h("button", { onclick: async () => {
-      await api("POST", `/achats/commandes/${id}/approbation`);
-      relire("Commande approuvée.");
+      const r = await api("POST", `/achats/commandes/${id}/approbation`);
+      relire(r.avertissements?.length
+        ? `Commande approuvée. Attention, au-delà de deux mois de stock après réception : ${r.avertissements.map((x) => x.categorie).join(", ")}.`
+        : "Commande approuvée.");
     } }, "Approuver la commande")) : null,
     ouverte && droits.includes("stocks.gerer") ? h("div", { class: "carte pas-imprimer" }, h("h2", {}, "Confirmer une réception en stock"),
       h("p", { class: "discret-texte" }, "Saisissez ce qui est réellement arrivé à l'entrepôt. Seule cette quantité entre en stock."),

@@ -360,9 +360,9 @@ description: "Liste des tâches des précommandes d'arrivage GLOMARI avec acompt
   - chaque droit vérifié côté serveur sur la branche ;
   - chaque code passé à `ErreurApi` présent dans `MESSAGES` ;
   - aucun secret dans le code.
-- [ ] T053 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
-- [ ] T054 Dérouler les scénarios de `specs/003-precommandes-arrivage/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera).
-- [ ] T055 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert (`.github/workflows/verification.yml`).
+- [X] T053 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
+- [X] T054 Dérouler les scénarios de `specs/003-precommandes-arrivage/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera).
+- [X] T055 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert (`.github/workflows/verification.yml`).
 
 ---
 

@@ -92,8 +92,8 @@ function lignesImportStock(rangs) {
   }));
 }
 
-const ONGLETS_STOCK = [["etat", "État du stock"], ["articles", "Articles et catégories"], ["mouvements", "Mouvements et transferts"], ["expirations", "Dates d'expiration"], ["avaries", "Avariés"], ["import", "Importer un fichier"]];
-const ouvrirOngletStock = (c, message) => ({ etat: ecranStocks, articles: ecranStockArticles, mouvements: ecranStockMouvements, expirations: ecranStockExpirations, avaries: ecranStockAvaries, import: ecranStockImport })[c](message);
+const ONGLETS_STOCK = [["etat", "État du stock"], ["articles", "Articles et catégories"], ["mouvements", "Mouvements et transferts"], ["expirations", "Dates d'expiration"], ["avaries", "Avariés"], ["couverture", "Couverture"], ["import", "Importer un fichier"]];
+const ouvrirOngletStock = (c, message) => ({ etat: ecranStocks, articles: ecranStockArticles, mouvements: ecranStockMouvements, expirations: ecranStockExpirations, avaries: ecranStockAvaries, couverture: ecranStockCouverture, import: ecranStockImport })[c](message);
 const ongletsStock = (actif) => h("div", { class: "actions onglets pas-imprimer", role: "tablist", "aria-label": "Parties du module Stocks" },
   ONGLETS_STOCK.filter(([c]) => c !== "import" || droits.includes("catalogue.gerer")).map(([c, l]) => h("button", { class: c === actif ? "" : "discret", role: "tab", "aria-selected": c === actif ? "true" : "false", onclick: () => ouvrirOngletStock(c) }, l)));
 const enteteStock = (actif, message) => [h("h1", {}, "Stocks"), ongletsStock(actif), message ? h("div", { class: "succes", role: "status" }, message) : null];
@@ -147,6 +147,28 @@ async function ecranStocks(message, filtres = {}) {
           l.pieces !== l.quantite ? `${quantiteFr(l.pieces)} pièces` : null, l.type_colis ? `colis : ${l.type_colis}` : null, l.valeur === null ? null : `valeur ${fcfa(l.valeur)}`,
           `entrées ${quantiteFr(l.entrees)}, sorties ${quantiteFr(l.sorties)}`].filter(Boolean).join(" · "))))
         : h("p", { class: "discret-texte" }, "Aucun article pour ces filtres.")));
+}
+
+/** Couverture : combien de jours de ventes représente le stock de chaque catégorie, avec le plafond de deux mois (règle R11). */
+async function ecranStockCouverture(message, brancheId) {
+  const branches = (await api("GET", "/entites")).filter((e) => e.type === "branche" && e.domaine === "commerce");
+  const b = brancheId || branches[0]?.id;
+  // La couverture se lit sur toute la branche : un accès limité à un seul lieu ne suffit pas.
+  const r = b ? await api("GET", `/stocks/couverture?brancheId=${b}`).catch(() => null) : null;
+  vue(
+    enteteStock("couverture", message),
+    branches.length > 1 ? h("div", { class: "carte pas-imprimer" }, formulaire(async (v) => ecranStockCouverture(null, v.brancheId),
+      [choix("brancheId", "Branche", branches.map((x) => [x.id, x.nom]), b)], "Afficher")) : null,
+    !r ? h("p", { class: "discret-texte" }, b ? "Cette vue demande un accès au stock ou aux achats de toute la branche." : "Aucune branche avec du stock.")
+      : h("div", { class: "carte" }, h("h2", {}, "Couverture du stock par catégorie"),
+        h("p", { class: "discret-texte" }, `Couverture = stock de la branche divisé par les ventes moyennes par jour des ${r.periode_jours} derniers jours. Au-delà de ${r.seuil_jours} jours (deux mois), une alerte part le matin, une seule fois, aux acheteurs et aux responsables du stock. Les articles en dépôt-vente ne comptent pas.`),
+        r.categories.length ? tableau(["Catégorie", "Stock", `Ventes sur ${r.periode_jours} jours`, "Couverture", "Alerte"], r.categories.map((x) => h("tr", {},
+          h("td", {}, x.categorie), h("td", { class: "nombre" }, quantiteFr(x.stock)), h("td", { class: "nombre" }, quantiteFr(x.ventes_90)),
+          h("td", { class: "nombre" }, x.couverture_jours === null ? "Aucune vente" : `${quantiteFr(x.couverture_jours)} jours`),
+          h("td", {}, x.au_dessus
+            ? h("span", { class: "pastille retard" }, x.depasse_depuis ? `Au-delà de deux mois depuis le ${dateFr(x.depasse_depuis)}` : "Au-delà de deux mois")
+            : h("span", { class: "pastille ok" }, "Correct")))))
+          : h("p", { class: "discret-texte" }, "Aucune catégorie en stock dans cette branche.")));
 }
 
 /** Articles, catégories, unités et colis : créés une fois ici, repris partout (facturation, achats, caisse, entrepôts). */

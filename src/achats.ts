@@ -8,6 +8,8 @@ import { entrerEnStock, niveau, produitSuivi, sortirDuStock } from "./stocks.js"
 import { lierTiers } from "./tiers.js";
 import { coutRevient } from "./logistique.js";
 import { choisirUnite, enUniteDeBase } from "./articles.js";
+import { acomptesDeCommande, disponibleDeCommande } from "./acomptes.js";
+import { couverturePrevue } from "./couverture.js";
 
 const uuid = { type: "string", format: "uuid" } as const;
 const date = { type: "string", format: "date" } as const;
@@ -19,7 +21,24 @@ const annee = () => new Date().getFullYear();
 /** Comparaison au millième près, l'unité stockée. */
 const egal = (a: number, b: number) => Math.round(a * 1000) === Math.round(b * 1000);
 
-interface LigneCommande { produitId: string; quantite: number; prixUnitaire: number; unite?: string; poidsKg?: number; prixVente?: number }
+interface LigneCommande { produitId: string; quantite: number; prixUnitaire?: number; prixDevise?: number; unite?: string; poidsKg?: number; prixVente?: number }
+
+/** Devises d'achat : les fabricants facturent en yuans, dollars ou euros ; les montants restent en FCFA entiers. */
+export const DEVISES_ACHAT = ["USD", "CNY", "EUR"] as const;
+
+/** Montant exact en FCFA d'une quantité au prix en devise et au taux donnés, arrondi au franc, calculé en entiers. */
+export function totalLigneDevise(quantite: number, prixDevise: number, taux: number): number {
+  const q = BigInt(Math.round(quantite * 1000)), p = BigInt(Math.round(prixDevise * 10000)), t = BigInt(Math.round(taux * 10000));
+  const d = 100_000_000_000n;
+  return Number((q * p * t + d / 2n) / d);
+}
+
+/** Le taux de la comptabilité pour la devise, au jour de la commande ou au dernier jour connu avant. */
+async function tauxApplicable(c: Contexte["client"], devise: string, jour: string): Promise<{ code: string; taux: number; jour: string }> {
+  const { rows: [t] } = await c.query("select taux::text, jour::text from taux_change where devise = $1 and jour <= $2 order by jour desc limit 1", [devise, jour]);
+  if (!t) throw new ErreurApi(409, "taux_inconnu", { devise, jour });
+  return { code: devise, taux: Number(t.taux), jour: t.jour };
+}
 
 /** Étapes de suivi selon l'origine. La dernière, « en_stock », n'est posée que par la réception. */
 export const ETAPES_ACHAT = {
@@ -109,24 +128,39 @@ async function exigerModule(ctx: Contexte, entiteId: string) {
   if (!rows[0]?.actif) throw new ErreurApi(409, "module_inactif");
 }
 
-async function ecrireLignes(ctx: Contexte, commandeId: string, lignes: LigneCommande[]) {
+async function ecrireLignes(ctx: Contexte, commandeId: string, lignes: LigneCommande[], devise: { code: string; taux: number } | null = null) {
   await ctx.client.query("delete from lignes_achat where commande_id = $1", [commandeId]);
   let total = 0;
   for (const l of lignes) {
     await produitSuivi(ctx.client, l.produitId);
+    // Un article en dépôt-vente appartient à son fournisseur : il ne s'achète pas.
+    const { rows: [depot] } = await ctx.client.query("select 1 from articles_depot where produit_id = $1 and actif", [l.produitId]);
+    if (depot) throw new ErreurApi(409, "article_en_depot_vente", { produitId: l.produitId });
+    // En devise, le prix s'écrit dans la devise et se convertit au taux de la commande ; en FCFA, comme avant.
+    let prixAchete: number;
+    if (devise) {
+      if (l.prixDevise === undefined || l.prixUnitaire !== undefined) throw new ErreurApi(400, "prix_devise_obligatoire");
+      if (Math.abs(l.prixDevise * 10000 - Math.round(l.prixDevise * 10000)) > 1e-6) throw new ErreurApi(400, "donnees_invalides");
+      prixAchete = totalLigneDevise(1, l.prixDevise, devise.taux);
+    } else {
+      if (l.prixDevise !== undefined) throw new ErreurApi(400, "prix_devise_obligatoire");
+      if (l.prixUnitaire === undefined) throw new ErreurApi(400, "prix_obligatoire");
+      prixAchete = l.prixUnitaire;
+    }
     // Achat dans une autre unité (carton, palette…) : le stock et le coût se rangent dans l'unité de base.
     // Le coût de base est arrondi au franc ; le total de la commande, lui, reste celui de l'unité achetée.
     const { rows: [p] } = await ctx.client.query("select unite, pieces_par_unite::float, conditionnements, prix_piece from produits where id = $1", [l.produitId]);
     const u = choisirUnite(p, l.unite);
     const base = u.base ? l.quantite : enUniteDeBase(l.quantite, u);
     if (!(base > 0)) throw new ErreurApi(400, "donnees_invalides");
-    const prixBase = u.base ? l.prixUnitaire : Math.round(l.prixUnitaire / u.facteur);
+    const prixBase = u.base ? prixAchete : Math.round(prixAchete / u.facteur);
     await ctx.client.query(
-      `insert into lignes_achat (organisation_id, commande_id, produit_id, quantite, prix_unitaire, poids_kg, prix_vente_prevu, unite, quantite_unite, prix_unite)
-       values ($1, $2, $3, $4, $5, $6, coalesce($7::int8, (select nullif(prix_vente, 0) from produits where id = $3)), $8, $9, $10)`,
-      [ctx.organisationId, commandeId, l.produitId, base, prixBase, l.poidsKg ?? null, l.prixVente ?? null, u.base ? null : u.nom, u.base ? null : l.quantite, u.base ? null : l.prixUnitaire],
+      `insert into lignes_achat (organisation_id, commande_id, produit_id, quantite, prix_unitaire, poids_kg, prix_vente_prevu, unite, quantite_unite, prix_unite, prix_devise)
+       values ($1, $2, $3, $4, $5, $6, coalesce($7::int8, (select nullif(prix_vente, 0) from produits where id = $3)), $8, $9, $10, $11)`,
+      [ctx.organisationId, commandeId, l.produitId, base, prixBase, l.poidsKg ?? null, l.prixVente ?? null, u.base ? null : u.nom, u.base ? null : l.quantite, u.base ? null : prixAchete,
+        devise ? l.prixDevise : null],
     );
-    total += Math.round(Math.round(l.quantite * 1000) * l.prixUnitaire / 1000);
+    total += devise ? totalLigneDevise(l.quantite, l.prixDevise!, devise.taux) : Math.round(Math.round(l.quantite * 1000) * prixAchete / 1000);
   }
   await ctx.client.query("update commandes_achat set total = $2 where id = $1", [commandeId, total]);
 }
@@ -155,7 +189,7 @@ const noterEtape = (ctx: Contexte, commandeId: string, etape: string, le: string
 export interface NouvelleCommandeAchat {
   entiteId: string; fournisseurId: string; date: string; datePrevue?: string; notes?: string; lignes: LigneCommande[];
   origine?: "local" | "import"; acheteurId?: string; referenceFournisseur?: string; paysOrigine?: string;
-  transitaireId?: string; modeTransport?: "maritime" | "aerien"; volumeM3?: number;
+  transitaireId?: string; modeTransport?: "maritime" | "aerien"; volumeM3?: number; devise?: (typeof DEVISES_ACHAT)[number];
 }
 
 /** Bon de commande en brouillon, au nom de l'utilisateur du contexte : depuis l'écran, ou au seuil d'une précommande. */
@@ -172,17 +206,19 @@ export async function creerCommandeAchat(ctx: Contexte, exigerSurEntite: Outils[
     "update tiers set roles = array_append(roles, 'fournisseur') where id = $1 and not ('fournisseur' = any(roles))",
     [b.fournisseurId],
   );
+  // Le taux du jour de commande est gardé sur le bon ; les lignes ne changent plus après l'approbation, lui non plus.
+  const devise = b.devise ? await tauxApplicable(ctx.client, b.devise, b.date) : null;
   const numero = await prochainNumero(ctx.client, `BC-${annee()}`);
   const { rows } = await ctx.client.query(
     `insert into commandes_achat (organisation_id, entite_id, numero, fournisseur_id, date_commande, date_prevue, notes, cree_par,
-       origine, acheteur_id, reference_fournisseur, pays_origine, etape_le, transitaire_id, mode_transport, volume_m3)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $5, $13, $14, $15) returning id`,
+       origine, acheteur_id, reference_fournisseur, pays_origine, etape_le, transitaire_id, mode_transport, volume_m3, devise, taux, taux_jour)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $5, $13, $14, $15, $16, $17, $18) returning id`,
     [ctx.organisationId, b.entiteId, numero, b.fournisseurId, b.date, b.datePrevue ?? null, b.notes ?? null, ctx.utilisateurId,
       b.origine ?? "local", acheteurId, b.referenceFournisseur?.trim() || null, b.paysOrigine?.trim() || null,
-      b.transitaireId ?? null, b.modeTransport ?? null, b.volumeM3 ?? null],
+      b.transitaireId ?? null, b.modeTransport ?? null, b.volumeM3 ?? null, devise?.code ?? null, devise?.taux ?? null, devise?.jour ?? null],
   );
   await noterEtape(ctx, rows[0].id, "commandee", b.date, null);
-  await ecrireLignes(ctx, rows[0].id, b.lignes);
+  await ecrireLignes(ctx, rows[0].id, b.lignes, devise);
   return (await ctx.client.query("select * from commandes_achat where id = $1", [rows[0].id])).rows[0];
 }
 
@@ -199,9 +235,10 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
   const schemaLignes = {
     type: "array", minItems: 1, maxItems: 500,
     items: {
-      type: "object", required: ["produitId", "quantite", "prixUnitaire"],
+      type: "object", required: ["produitId", "quantite"],
       properties: {
         produitId: uuid, quantite, prixUnitaire: { type: "integer", minimum: 0, maximum: 10_000_000_000 },
+        prixDevise: { type: "number", minimum: 0, maximum: 100_000_000 },
         unite: { type: "string", minLength: 1, maxLength: 50 },
         poidsKg: { type: "number", minimum: 0, maximum: 1_000_000_000, multipleOf: 0.001 },
         prixVente: { type: "integer", minimum: 0, maximum: 10_000_000_000 },
@@ -223,6 +260,7 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
           origine: { type: "string", enum: ["local", "import"] }, acheteurId: uuid,
           referenceFournisseur: { type: "string", maxLength: 100 }, paysOrigine: { type: "string", maxLength: 100 },
           transitaireId: uuid, modeTransport: { type: "string", enum: ["maritime", "aerien"] }, volumeM3: volume,
+          devise: { type: "string", enum: DEVISES_ACHAT },
         },
       },
     },
@@ -232,7 +270,7 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
   });
 
   const commande = async (ctx: Contexte, id: string, permission: "achats.voir" | "achats.gerer" | "achats.approuver" | "stocks.gerer") => {
-    const { rows } = await ctx.client.query("select *, date_commande::text as date_commande_texte from commandes_achat where id = $1 for update", [id]);
+    const { rows } = await ctx.client.query("select *, date_commande::text as date_commande_texte, entite_branche(entite_id) as branche_id from commandes_achat where id = $1 for update", [id]);
     if (!rows[0]) throw new ErreurApi(404, "introuvable");
     await exigerSurEntite(ctx, permission, rows[0].entite_id);
     return rows[0];
@@ -352,6 +390,7 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
       const ids = (await entitesAccessibles(ctx.client, ctx.utilisateurId, "achats.voir")).map((e) => e.id);
       const lignes = await ctx.client.query(
         `select l.id, l.produit_id, p.nom, p.code, p.unite, l.quantite::float, l.prix_unitaire, l.quantite_recue::float, l.poids_kg::float, l.unite as unite_achat, l.quantite_unite::float, l.prix_unite,
+           l.prix_devise::float,
            l.prix_vente_prevu, nullif(p.prix_vente, 0) as prix_catalogue,
            ${PRIX_HABITUEL} as prix_habituel,
            (select json_build_object('prix', l3.prix_unitaire, 'fournisseur', t3.nom, 'date', c3.date_commande)
@@ -387,6 +426,9 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
       );
       const total = Number(c.total);
       const etude = rentabilite(lignes.rows, total, totalFrais);
+      // En devise : le total dans la devise de la commande, pour le comparer à la facture du fabricant.
+      const totalDevise = c.devise
+        ? Math.round(lignes.rows.reduce((s, l) => s + (l.quantite_unite ?? l.quantite) * (l.prix_devise ?? 0), 0) * 100) / 100 : null;
       const poids = lignes.rows.reduce((s, l) => s + (l.poids_kg ?? 0), 0);
       const parNature = new Map<string, number>();
       for (const f of frais.rows) if (!f.retire_le) parNature.set(f.nature, (parNature.get(f.nature) ?? 0) + Number(f.montant));
@@ -408,6 +450,9 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
           };
         }),
         paiement: await paiement(ctx, c),
+        taux: c.taux === null ? null : Number(c.taux), total_devise: totalDevise,
+        acomptes: await voitLesAcomptes(ctx, c.entite_id) ? await acomptesDeCommande(ctx.client, c.id) : null,
+        couverture_prevue: ["brouillon", "approuvee", "recue_partiellement"].includes(c.statut) ? await couverturePrevue(ctx.client, c.id) : [],
       };
     }),
   );
@@ -419,10 +464,21 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
       const c = await commande(ctx, req.params.id, "achats.gerer");
       if (c.statut !== "brouillon") throw new ErreurApi(409, "commande_figee");
       if (new Set(req.body.lignes.map((l) => l.produitId)).size !== req.body.lignes.length) throw new ErreurApi(400, "produit_en_double");
-      await ecrireLignes(ctx, req.params.id, req.body.lignes);
+      // En brouillon, une modification reprend le taux applicable au jour de la commande.
+      const devise = c.devise ? await tauxApplicable(ctx.client, c.devise, String(c.date_commande_texte)) : null;
+      if (devise) await ctx.client.query("update commandes_achat set taux = $2, taux_jour = $3 where id = $1", [c.id, devise.taux, devise.jour]);
+      await ecrireLignes(ctx, req.params.id, req.body.lignes, devise);
       return (await ctx.client.query("select total from commandes_achat where id = $1", [req.params.id])).rows[0];
     }),
   );
+
+  /** Les acomptes sont de l'argent sorti : la comptabilité et la trésorerie de la branche les voient, pas le magasin. */
+  const voitLesAcomptes = async (ctx: Contexte, entiteId: string) => {
+    const { rows: [b] } = await ctx.client.query("select entite_branche($1) as id", [entiteId]);
+    if (!b?.id) return false;
+    for (const p of ["compta.voir", "tresorerie.voir"] as const) if (await aPermissionSurEntite(ctx.client, ctx.utilisateurId, p, b.id)) return true;
+    return false;
+  };
 
   /** Factures et paiements liés à la commande, visibles seulement avec l'accès à la comptabilité de la branche. */
   const paiement = async (ctx: Contexte, c: { id: string; entite_id: string }) => {
@@ -434,7 +490,7 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
        from factures_fournisseur f where f.commande_id = $1 and f.statut <> 'annulee' order by f.date_facture`, [c.id],
     )).rows;
     const paiements = (await ctx.client.query(
-      `select p.montant, p.date_paiement, p.reference, x.nom as moyen, f.numero_fournisseur as facture
+      `select p.montant, p.date_paiement, p.reference, x.nom as moyen, f.numero_fournisseur as facture, (p.acompte_id is not null) as acompte_impute
        from paiements_fournisseur p join factures_fournisseur f on f.id = p.facture_id join portefeuilles x on x.id = p.portefeuille_id
        where f.commande_id = $1 and p.annule_le is null order by p.date_paiement`, [c.id],
     )).rows;
@@ -610,7 +666,9 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
         [req.params.id, ctx.utilisateurId],
       );
       await publierEvenement(ctx.client, "achat.approuve", { id: req.params.id, numero: c.numero });
-      return { statut: "approuvee" };
+      // Règle des deux mois de stock : un avertissement, jamais un blocage.
+      const avertissements = (await couverturePrevue(ctx.client, req.params.id)).map((x) => ({ categorie: x.categorie, couverture_prevue: x.couverture_prevue }));
+      return { statut: "approuvee", avertissements };
     }),
   );
 
@@ -620,6 +678,8 @@ export function enregistrerAchats(app: FastifyInstance, outils: Outils): void {
     protege(req, async (ctx) => {
       const c = await commande(ctx, req.params.id, "achats.gerer");
       if (!["brouillon", "approuvee"].includes(c.statut)) throw new ErreurApi(409, "commande_deja_recue");
+      // L'argent versé d'avance est chez le fournisseur : il doit d'abord revenir ou s'imputer sur une facture.
+      if ((await disponibleDeCommande(ctx.client, c.id)) > 0) throw new ErreurApi(409, "acompte_a_recuperer");
       await ctx.client.query("update commandes_achat set statut = 'annulee', motif_annulation = $2 where id = $1", [req.params.id, req.body.motif]);
       return { statut: "annulee" };
     }),

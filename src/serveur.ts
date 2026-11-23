@@ -50,6 +50,9 @@ import { enregistrerMall } from "./mall.js";
 import { enregistrerCanalEnLigne, expirerCommandesWeb } from "./canalenligne.js";
 import { enregistrerPaiementEnLigne, type PrestatairePaiement } from "./paiementenligne.js";
 import { enregistrerPrecommandes, expirerPrecommandes } from "./precommandes.js";
+import { enregistrerAcomptes } from "./acomptes.js";
+import { enregistrerDepotVente } from "./depotvente.js";
+import { enregistrerCouverture } from "./couverture.js";
 import { enregistrerPilotage } from "./pilotage.js";
 import { enregistrerRh } from "./rh.js";
 import { enregistrerTresorerie } from "./tresorerie.js";
@@ -816,6 +819,9 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
     prestataires: options.prestatairesPaiement ?? [], urlPublique: options.urlPublique, paiementsParMinute: options.debitCanal?.paiements ?? 10,
   });
   enregistrerPrecommandes(app, pool, { protege, exigerSurEntite, exiger }, taches, { commandesParMinute: options.debitCanal?.commandes ?? 20 });
+  enregistrerAcomptes(app, { protege, exigerSurEntite, exiger });
+  enregistrerDepotVente(app, { protege, exigerSurEntite, exiger });
+  enregistrerCouverture(app, pool, { protege, exigerSurEntite, exiger }, taches);
   enregistrerRecouvrement(app, { protege, exigerSurEntite, exiger });
   enregistrerProspection(app, pool, { protege, exigerSurEntite, exiger });
   enregistrerSocle(app, { protege, exigerSurEntite, exiger });
