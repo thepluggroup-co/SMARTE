@@ -50,10 +50,60 @@ export async function expirerCommandesWeb(c: Client): Promise<number> {
   return rows.length;
 }
 
-interface Boutique { org: string; configId: string; branche: string; nom: string }
-interface CorpsCommande {
-  lieuId: string; lignes: { produitId: string; quantite: number }[]; nomClient: string; telephone: string;
-  modeLivraison: string; zoneId?: string; pointRelaisId?: string; adresse?: string; moyenPaiement: string; note?: string;
+export interface Boutique { org: string; configId: string; branche: string; nom: string }
+export interface ChoixLivraison { modeLivraison: string; zoneId?: string; pointRelaisId?: string; adresse?: string }
+interface CorpsCommande extends ChoixLivraison {
+  lieuId: string; lignes: { produitId: string; quantite: number }[]; nomClient: string; telephone: string; moyenPaiement: string; note?: string;
+}
+
+/** Tout échec renvoie « introuvable », sans dire si l'organisation existe ou si sa boutique est fermée. */
+export function parBoutique<T>(pool: pg.Pool, org: string, fn: (c: Client, b: Boutique) => Promise<T>): Promise<T> {
+  if (!UUID.test(org)) throw new ErreurApi(404, "introuvable");
+  return dansOrganisation(pool, org, async (c) => {
+    const { rows: [k] } = await c.query("select k.id, k.entite_id, e.nom from config_canal k join entites e on e.id = k.entite_id where k.actif");
+    if (!k) throw new ErreurApi(404, "introuvable");
+    return fn(c, { org, configId: k.id, branche: k.entite_id, nom: k.nom });
+  });
+}
+
+/** Même règle que le client rapide de la caisse : un numéro déjà connu dans la branche rend sa fiche. */
+export async function ficheClient(c: Client, b: Boutique, lieuId: string, nom: string, telephone: string): Promise<string> {
+  // Deux commandes simultanées d'un nouveau client ne créent qu'une fiche.
+  await c.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`tiers:${b.branche}:${telephone}`]);
+  const { rows: [t] } = await c.query("select id from tiers where telephone = $1 and not archive and branche_id = $2 limit 1", [telephone, b.branche]);
+  if (t) return t.id;
+  const { rows: [n] } = await c.query(
+    "insert into tiers (organisation_id, type, nom, telephone, roles, entite_origine_id, branche_id) values ($1, 'personne', $2, $3, '{client}', $4, $5) returning id",
+    [b.org, nom, telephone, lieuId, b.branche],
+  );
+  await publierEvenement(c, "tiers.cree", { id: n.id });
+  return n.id;
+}
+
+/** Règles du mode de remise, communes à la commande et au solde d'une précommande. Renvoie l'adresse retenue. */
+export function verifierLivraison(b: ChoixLivraison): string | null {
+  if (!MODES.includes(b.modeLivraison)) throw new ErreurApi(400, "mode_livraison_invalide");
+  const avecZone = AVEC_ZONE.includes(b.modeLivraison);
+  if (avecZone !== Boolean(b.zoneId)) throw new ErreurApi(400, "zone_invalide");
+  if ((b.modeLivraison === "point_relais") !== Boolean(b.pointRelaisId)) throw new ErreurApi(400, "point_relais_invalide");
+  const adresse = avecZone ? b.adresse?.trim() || null : null;
+  if (avecZone && !adresse) throw new ErreurApi(400, "donnees_invalides");
+  return adresse;
+}
+
+/** Frais de la zone choisie ; zone et point relais doivent être ceux de la branche. */
+export async function fraisLivraison(c: Client, branche: string, b: ChoixLivraison): Promise<number> {
+  let frais = 0;
+  if (b.zoneId) {
+    const { rows: [z] } = await c.query("select frais from zones_livraison where id = $1 and entite_id = $2", [b.zoneId, branche]);
+    if (!z) throw new ErreurApi(400, "zone_invalide");
+    frais = z.frais;
+  }
+  if (b.pointRelaisId) {
+    const { rows: [p] } = await c.query("select 1 from points_relais where id = $1 and actif and entite_branche(entite_id) = $2", [b.pointRelaisId, branche]);
+    if (!p) throw new ErreurApi(400, "point_relais_invalide");
+  }
+  return frais;
 }
 
 export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, outils: Outils, taches: TachePlanifiee[], urlPublique: string, commandesParMinute = 20): void {
@@ -140,15 +190,6 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
 
   // ---------- Routes publiques de la Marketplace ----------
 
-  /** Tout échec renvoie « introuvable », sans dire si l'organisation existe ou si sa boutique est fermée. */
-  const parBoutique = <T>(org: string, fn: (c: Client, b: Boutique) => Promise<T>): Promise<T> => {
-    if (!UUID.test(org)) throw new ErreurApi(404, "introuvable");
-    return dansOrganisation(pool, org, async (c) => {
-      const { rows: [k] } = await c.query("select k.id, k.entite_id, e.nom from config_canal k join entites e on e.id = k.entite_id where k.actif");
-      if (!k) throw new ErreurApi(404, "introuvable");
-      return fn(c, { org, configId: k.id, branche: k.entite_id, nom: k.nom });
-    });
-  };
   const lieuxDe = async (c: Client, configId: string) => (await c.query(
     "select l.entite_id as id, l.nom_public as nom from lieux_canal l join entites e on e.id = l.entite_id where l.config_id = $1 and l.actif and e.actif order by l.nom_public",
     [configId],
@@ -156,7 +197,7 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
 
   /** Jamais le coût, la marge ni le fournisseur : la liste des colonnes est fermée. Pas de quantité : la Marketplace garde ce catalogue en cache. */
   app.get<{ Params: { org: string } }>("/marketplace/:org/catalogue", { config: parMinute(60) }, async (req) =>
-    parBoutique(req.params.org, async (c, b) => {
+    parBoutique(pool, req.params.org, async (c, b) => {
       const { rows } = await c.query(
         `select p.id, p.code, p.nom, p.unite, p.prix_vente, p.taux_taxe::float as taux_taxe,
            p.paliers_actif and p.mode_palier = 'tranches' as tranches,
@@ -195,7 +236,7 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
     schema: { params: { type: "object", required: ["org", "id", "position"], properties: { org: { type: "string" }, id: { type: "string" }, position: { type: "integer", minimum: 1, maximum: 4 } } } },
   }, async (req, reponse) => {
     if (!UUID.test(req.params.id)) throw new ErreurApi(404, "introuvable");
-    const photo = await parBoutique(req.params.org, async (c, b) => {
+    const photo = await parBoutique(pool, req.params.org, async (c, b) => {
       const { rows: [x] } = await c.query(
         `select f.type_mime, f.donnees, f.maj_le from photos_produits f join produits p on p.id = f.produit_id
          where f.produit_id = $1 and f.position = $2 and ${ARTICLE_EN_LIGNE} and entite_branche(p.entite_id) = $3`,
@@ -218,7 +259,7 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
   }, async (req) => {
     const ids = [...new Set((req.query.produits ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean))];
     if (!ids.length || ids.length > 100 || !ids.every((i) => UUID.test(i))) throw new ErreurApi(400, "donnees_invalides");
-    return parBoutique(req.params.org, async (c, b) => (await c.query(
+    return parBoutique(pool, req.params.org, async (c, b) => (await c.query(
       `select p.id as produit_id,
          coalesce(json_object_agg(l.entite_id, greatest(quantite_vendable(l.entite_id, p.id), 0)::float8) filter (where l.entite_id is not null), '{}'::json) as lieux
        from produits p
@@ -230,7 +271,7 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
   });
 
   app.get<{ Params: { org: string } }>("/marketplace/:org/zones", { config: parMinute(60) }, async (req) =>
-    parBoutique(req.params.org, async (c, b) => ({
+    parBoutique(pool, req.params.org, async (c, b) => ({
       lieux: await lieuxDe(c, b.configId),
       // Zones et colis sont au nom de la branche : un lieu n'a pas le module transport.
       zones: (await c.query("select id, nom, frais, delai_jours from zones_livraison where entite_id = $1 order by nom", [b.branche])).rows,
@@ -239,20 +280,6 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
       moyens_paiement: MOYENS,
     })),
   );
-
-  /** Même règle que le client rapide de la caisse : un numéro déjà connu dans la branche rend sa fiche. */
-  const ficheClient = async (c: Client, b: Boutique, lieuId: string, nom: string, telephone: string): Promise<string> => {
-    // Deux commandes simultanées d'un nouveau client ne créent qu'une fiche.
-    await c.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`tiers:${b.branche}:${telephone}`]);
-    const { rows: [t] } = await c.query("select id from tiers where telephone = $1 and not archive and branche_id = $2 limit 1", [telephone, b.branche]);
-    if (t) return t.id;
-    const { rows: [n] } = await c.query(
-      "insert into tiers (organisation_id, type, nom, telephone, roles, entite_origine_id, branche_id) values ($1, 'personne', $2, $3, '{client}', $4, $5) returning id",
-      [b.org, nom, telephone, lieuId, b.branche],
-    );
-    await publierEvenement(c, "tiers.cree", { id: n.id });
-    return n.id;
-  };
 
   app.post<{ Params: { org: string }; Body: CorpsCommande }>("/marketplace/:org/commandes", {
     config: parMinute(commandesParMinute),
@@ -278,13 +305,9 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
     },
   }, async (req, reponse) => {
     const b = req.body;
-    if (!MODES.includes(b.modeLivraison)) throw new ErreurApi(400, "mode_livraison_invalide");
-    const avecZone = AVEC_ZONE.includes(b.modeLivraison);
-    if (avecZone !== Boolean(b.zoneId)) throw new ErreurApi(400, "zone_invalide");
-    if ((b.modeLivraison === "point_relais") !== Boolean(b.pointRelaisId)) throw new ErreurApi(400, "point_relais_invalide");
+    const adresse = verifierLivraison(b);
     const nom = b.nomClient.trim();
-    const adresse = avecZone ? b.adresse?.trim() || null : null;
-    if (nom.length < 2 || (avecZone && !adresse)) throw new ErreurApi(400, "donnees_invalides");
+    if (nom.length < 2) throw new ErreurApi(400, "donnees_invalides");
     const telephone = normaliserTelephone(b.telephone);
     if (!/^[0-9]{8,15}$/.test(telephone)) throw new ErreurApi(400, "telephone_invalide");
     // Un ordre de verrouillage constant évite que deux commandes s'attendent l'une l'autre.
@@ -292,23 +315,14 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
     if (new Set(lignes.map((l) => l.produitId)).size !== lignes.length) throw new ErreurApi(400, "donnees_invalides");
     const jeton = randomBytes(32).toString("base64url");
 
-    const r = await parBoutique(req.params.org, async (c, bq) => {
+    const r = await parBoutique(pool, req.params.org, async (c, bq) => {
       await expirerCommandesWeb(c);
       const { rows: [lieu] } = await c.query(
         "select l.entite_id from lieux_canal l join entites e on e.id = l.entite_id where l.config_id = $1 and l.entite_id = $2 and l.actif and e.actif",
         [bq.configId, b.lieuId],
       );
       if (!lieu) throw new ErreurApi(400, "lieu_invalide");
-      let frais = 0;
-      if (b.zoneId) {
-        const { rows: [z] } = await c.query("select frais from zones_livraison where id = $1 and entite_id = $2", [b.zoneId, bq.branche]);
-        if (!z) throw new ErreurApi(400, "zone_invalide");
-        frais = z.frais;
-      }
-      if (b.pointRelaisId) {
-        const { rows: [p] } = await c.query("select 1 from points_relais where id = $1 and actif and entite_branche(entite_id) = $2", [b.pointRelaisId, bq.branche]);
-        if (!p) throw new ErreurApi(400, "point_relais_invalide");
-      }
+      const frais = await fraisLivraison(c, bq.branche, b);
       const tiersId = await ficheClient(c, bq, lieu.entite_id, nom, telephone);
 
       const calcul: { produitId: string; nom: string; quantite: number; ht: number; ttcUnitaire: number; taux: number; totalHt: number; totalTtc: number }[] = [];
@@ -368,10 +382,10 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
   }, async (req) => {
     const jeton = req.query.jeton ?? "";
     if (!REFERENCE.test(req.params.reference) || !JETON.test(jeton)) throw new ErreurApi(404, "introuvable");
-    return parBoutique(req.params.org, async (c, b) => {
+    return parBoutique(pool, req.params.org, async (c, b) => {
       const { rows: [w] } = await c.query(
         `select w.id, w.reference, w.statut, l.nom_public as lieu, w.mode_livraison, z.nom as zone, r.nom as point_relais, w.moyen_paiement,
-           w.frais_livraison, w.total_ttc, w.expire_le, w.cree_le, k.statut as colis_statut, k.code_suivi
+           w.frais_livraison, w.total_ttc, w.acompte, w.expire_le, w.cree_le, k.statut as colis_statut, k.code_suivi
          from commandes_web w
          left join lieux_canal l on l.config_id = $3 and l.entite_id = w.lieu_id
          left join zones_livraison z on z.id = w.zone_id
@@ -387,7 +401,9 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
       );
       return {
         reference: w.reference, statut: w.statut, lieu: w.lieu, mode_livraison: w.mode_livraison, zone: w.zone, point_relais: w.point_relais,
-        moyen_paiement: w.moyen_paiement, frais_livraison: w.frais_livraison, total_ttc: w.total_ttc, expire_le: w.expire_le, cree_le: w.cree_le,
+        moyen_paiement: w.moyen_paiement, frais_livraison: w.frais_livraison, total_ttc: w.total_ttc,
+        // Solde d'une précommande : l'acompte déjà versé est déduit du montant à payer.
+        acompte: w.acompte, montant_a_payer: w.total_ttc - w.acompte, expire_le: w.expire_le, cree_le: w.cree_le,
         lignes, colis: w.colis_statut ? { statut: w.colis_statut, lien_suivi: lienColis(b.org, w.code_suivi) } : null,
       };
     });

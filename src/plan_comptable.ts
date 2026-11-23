@@ -36,4 +36,5 @@ export const PARAMETRES_DE_DEPART: Record<string, string> = {
   clients: "4111", ventes_marchandises: "7011", ventes_services: "7061", formations: "7061", tva_collectee: "4431",
   especes: "5711", orange_money: "552", mtn_momo: "552", virement: "5211", cheque: "513", carte: "5211", banque: "5211", autre: "4711",
   fournisseurs: "4011", fournisseurs_investissement: "4812", tva_recuperable: "4452", creances_cessions: "4851", valeur_cession: "812", produit_cession: "822", virements_internes: "585", frais_bancaires: "631", attente: "4711", fidelite: "658",
+  avances_clients: "4191", produits_divers: "758",
 };

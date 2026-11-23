@@ -2,7 +2,7 @@
 /* Commandes en ligne de la Marketplace GLOMARI. Le serveur calcule et contrôle tout : l'écran affiche et transmet. */
 
 const STATUTS_WEB = { reservee: "Réservée", payee: "Payée, vente à terminer", facturee: "Facturée", expediee: "Expédiée", livree: "Livrée", annulee: "Annulée", expiree: "Expirée", a_rembourser: "À rembourser" };
-const PAIEMENTS_WEB = { lance: "Lancé", reussi: "Réussi", echoue: "Échoué", a_rembourser: "À rembourser" };
+const PAIEMENTS_WEB = { lance: "Lancé", reussi: "Réussi", echoue: "Échoué", a_rembourser: "À rembourser", rembourse: "Remboursé" };
 const MOYENS_WEB = { orange_money: "Orange Money", mtn_momo: "MTN MoMo", a_la_livraison: "À la livraison" };
 const MODES_WEB = { domicile: "Domicile", agence_voyage: "Agence de voyage", point_relais: "Point relais", retrait_magasin: "Retrait au magasin" };
 const enAttenteWeb = (c) => c.statut === "reservee" && !c.colis_id;
@@ -17,6 +17,7 @@ async function ecranCommandesEnLigne(message, filtre = "") {
       h("label", {}, "Statut ", h("select", { onchange: (e) => ecranCommandesEnLigne(null, e.target.value) }, h("option", { value: "" }, "Tous"),
         Object.entries(STATUTS_WEB).map(([code, libelle]) => h("option", { value: code, selected: code === filtre }, libelle)))),
       droits.includes("tresorerie.voir") || droits.includes("facturation.voir") ? h("button", { class: "discret", onclick: () => ecranPaiementsEnLigne() }, "Paiements en ligne") : null,
+      h("button", { class: "discret", onclick: () => ecranPrecommandes() }, "Précommandes"),
       droits.includes("facturation.administrer") ? h("button", { class: "discret", onclick: () => ecranBoutiqueEnLigne() }, "Réglages de la boutique") : null),
     h("div", { class: "carte" }, commandes.length ? commandes.map((c) => carteCommandeWeb(c, gere, filtre)) : h("p", { class: "discret-texte" }, "Aucune commande.")));
 }
@@ -77,10 +78,16 @@ async function ecranPaiementsEnLigne(message, jour = aujourdhui(), moyen = "") {
       h("button", { class: "discret", onclick: () => ecranCommandesEnLigne() }, "Retour aux commandes")),
     h("div", { class: "chiffres" }, h("div", { class: "chiffre" }, h("b", {}, String(r.nombre)), h("span", {}, "paiements versés")), h("div", { class: "chiffre" }, h("b", {}, fcfa(r.total)), h("span", {}, "total"))),
     h("div", { class: "carte" }, r.paiements.length ? r.paiements.map((x) => h("div", { class: "apprenant" },
-      h("div", { class: "ligne" }, h("span", { class: "nom" }, `${x.commande} : ${fcfa(x.montant)}`), h("span", { class: x.statut === "reussi" ? "pastille ok" : x.statut === "a_rembourser" ? "pastille retard" : "pastille attente" }, PAIEMENTS_WEB[x.statut])),
-      h("div", { class: "discret-texte" }, [MOYENS_WEB[x.moyen], x.reference_prestataire, x.facture && `facture ${x.facture}`, x.en_attente ? "en attente d'affectation en trésorerie" : x.portefeuille].filter(Boolean).join(" · "))))
+      h("div", { class: "ligne" }, h("span", { class: "nom" }, `${x.commande || `Acompte ${x.inscription} (${x.campagne})`} : ${fcfa(x.montant)}`), h("span", { class: x.statut === "reussi" || x.statut === "rembourse" ? "pastille ok" : x.statut === "a_rembourser" ? "pastille retard" : "pastille attente" }, PAIEMENTS_WEB[x.statut])),
+      h("div", { class: "discret-texte" }, [MOYENS_WEB[x.moyen], x.reference_prestataire, x.facture && `facture ${x.facture}`, x.en_attente ? "en attente d'affectation en trésorerie" : x.portefeuille,
+        x.rembourse_le && `remboursé le ${dateHeureFr(x.rembourse_le)}${x.reference_remboursement ? ` (${x.reference_remboursement})` : ""}`].filter(Boolean).join(" · ")),
+      // Le trésorier rend l'argent par l'opérateur, puis l'enregistre ici : la sortie part du bon portefeuille, une seule fois.
+      x.statut === "a_rembourser" && droits.includes("tresorerie.gerer") ? h("details", {}, h("summary", {}, "Enregistrer le remboursement"), formulaire(async (v) => {
+        await api("POST", `/paiements-en-ligne/${x.id}/remboursement`, { referenceOperateur: v.r.trim() || undefined });
+        ecranPaiementsEnLigne(`Remboursement de ${fcfa(x.montant)} enregistré.`, jour, moyen);
+      }, [champ("Référence du remboursement chez l'opérateur", { name: "r", maxlength: 100 })], "Enregistrer")) : null))
       : h("p", { class: "discret-texte" }, "Aucun paiement ce jour-là.")),
-    rembourser.length ? h("p", { class: "discret-texte" }, `${rembourser.length} paiement(s) à rembourser : une tâche a été confiée au trésorier pour chacun.`) : null);
+    rembourser.length ? h("p", { class: "discret-texte" }, `${rembourser.length} paiement(s) à rembourser : le trésorier a reçu une tâche ; il rembourse par l'opérateur puis enregistre le remboursement ici.`) : null);
 }
 
 async function ecranBoutiqueEnLigne(message) {
