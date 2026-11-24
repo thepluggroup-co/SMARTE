@@ -203,9 +203,9 @@ description: "Liste des tâches de l'assistant GLOMARI Care et du studio des fic
   - aucune donnée de GTA ;
   - aucun appel réseau dans les tests ;
   - la règle « aucun nom déclaré deux fois » des écrans respectée.
-- [ ] T035 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
-- [ ] T036 Dérouler les scénarios de `specs/007-care-studio/quickstart.md` (automatisés par les tests ; recette avec l'IA réelle sur le serveur d'essai quand il existera).
-- [ ] T037 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert.
+- [X] T035 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
+- [X] T036 Dérouler les scénarios de `specs/007-care-studio/quickstart.md` (automatisés par les tests ; recette avec l'IA réelle sur le serveur d'essai quand il existera).
+- [X] T037 Avec l'accord du responsable technique, pousser la branche, ouvrir la demande de fusion et attendre le contrôle GitHub au vert.
 
 ---
 
