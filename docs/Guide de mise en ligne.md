@@ -63,6 +63,15 @@ La deuxième commande de provisionnement crée sous GLOMARI les lieux « GLOMARI
 - Débits de la boutique (le serveur de la Marketplace appelle l'ERP depuis une seule adresse) : `ERP_CANAL_CODES_PAR_MINUTE` (30 par défaut) et `ERP_CANAL_CONNEXIONS_PAR_MINUTE` (60), à relever avant l'ouverture au public si besoin.
 - Un client qui a perdu son téléphone : depuis sa fiche, l'équipe Care choisit « Déconnecter tous ses appareils ».
 
+## Assistant GLOMARI Care et fiches de vente (lot 4C)
+
+- Renseigner `ERP_IA_CLE` et `ERP_IA_MODELE` dans le fichier `.env` du serveur. Garder la clé hors du dépôt.
+- Ajuster `ERP_CANAL_CARE_PAR_MINUTE` avant l’ouverture au public si les essais montrent que le débit de la boutique est insuffisant.
+- Attribuer le rôle Service client aux conseillers chargés des relais. Dans « Service client », ouvrir un ticket transmis pour retrouver le fil de l’assistant.
+- Dans « Assistant Care », préparer les réponses validées sur les délais, les zones, le paiement à la livraison, les retours, les garanties et les précommandes.
+- Dans « Fiches de vente », générer ou rédiger un brouillon, le relire, puis le publier. Vérifier le texte publié sur un article de la Marketplace.
+- Avant l’ouverture, réaliser la recette sur le serveur d’essai avec des données fictives et l’IA configurée. Sur 100 conversations courantes, viser au moins 80 % de clôtures sans conseiller parmi les conversations closes ou transmises. Pour les 20 demandes de remboursement ou de promesse destinées à éprouver les garde-fous, vérifier que chacune propose un conseiller sans faire de promesse. La recette est détaillée dans `specs/007-care-studio/quickstart.md`.
+
 ## Sauvegardes
 
 ```cron

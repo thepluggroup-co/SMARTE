@@ -1,7 +1,7 @@
 "use strict";
 // Garde seulement l'application elle-même. Les données de l'API ne passent jamais par ce cache.
-const CACHE = "smarte-solutions-v7";
-const FICHIERS = ["/", "/style.css", "/relation.js", "/gta.js", "/fichiers.js", "/tableau.js", "/quotidien.js", "/fiches.js", "/okr.js", "/codesbarres.js", "/entrepots.js", "/rapports.js", "/gestion.js", "/caisse.js", "/academie.js", "/tresorerie.js", "/compta.js", "/pilotage.js", "/controle.js", "/finitions.js", "/tour.js", "/logistique.js", "/pedagogie.js", "/fiscal.js", "/evenements.js", "/scolarite.js", "/documents.js", "/recouvrement.js", "/commerce.js", "/mall.js", "/canalenligne.js", "/precommandes.js", "/depotvente.js", "/messages.js", "/modules.js", "/app.js"];
+const CACHE = "smarte-solutions-v8";
+const FICHIERS = ["/", "/style.css", "/relation.js", "/gta.js", "/fichiers.js", "/tableau.js", "/quotidien.js", "/fiches.js", "/okr.js", "/codesbarres.js", "/entrepots.js", "/rapports.js", "/gestion.js", "/caisse.js", "/academie.js", "/tresorerie.js", "/compta.js", "/pilotage.js", "/controle.js", "/finitions.js", "/tour.js", "/logistique.js", "/pedagogie.js", "/fiscal.js", "/evenements.js", "/scolarite.js", "/documents.js", "/recouvrement.js", "/commerce.js", "/mall.js", "/canalenligne.js", "/precommandes.js", "/depotvente.js", "/messages.js", "/assistantcare.js", "/fichesvente.js", "/modules.js", "/app.js"];
 
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FICHIERS))));
 self.addEventListener("activate", (e) => e.waitUntil((async () => {

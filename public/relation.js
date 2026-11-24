@@ -220,6 +220,7 @@ async function ecranTicket(id, message) {
     h("h1", {}, `${k.numero} : ${k.sujet}`),
     h("p", { class: "discret-texte" }, `${k.client}${k.telephone ? ` · ${k.telephone}` : ""} · À traiter avant ${heure(k.echeance)} `, pastilleTicket(k)),
     message ? h("div", { class: "succes", role: "status" }, message) : null,
+    k.conversation ? filAssistantCare(k.conversation) : null,
     h("div", { class: "carte" }, h("h2", {}, "Échanges"), k.messages.map((m) => h("div", { class: "apprenant" },
       h("div", {}, m.contenu), h("div", { class: "discret-texte" }, `${m.auteur} · ${heure(m.cree_le)}`)))),
     droits.includes("support.gerer") ? [

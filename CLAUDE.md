@@ -38,7 +38,16 @@ Tout changement passe par une branche, une demande de fusion et les contrôles G
 
 Tous les modules prévus sont développés et relus. Verdict : prêt pour un essai privé avec des données fictives, pas pour de vraies données ni une ouverture au public. Guide : `docs/Guide de mise en ligne.md`. Couverture : `docs/Couverture du cahier des charges.md`.
 
-Les 21 et 22 novembre 2026, d'après `docs/Fiche technique globale GLOMARI.md` : lot 0, points 1 à 3 (contrôle GitHub `verification.yml`, lieux de GLOMARI par `npm run provisionner:glomari`, import des clients), lot 1 (canal en ligne) et lot 2 (paiement Mobile Money, avec le prestataire factice) livrés. Le 23 novembre 2026, lot 3 partie A (précommandes d'arrivage avec acompte) livré, puis partie B (achats à l'import : acomptes au fournisseur, devises, dépôt-vente, couverture de stock), puis lot 4 partie A (messages automatiques aux clients avec un prestataire factice, avis publiés par article), puis partie B (comptes clients en ligne par code SMS). Le lot 4 est découpé en trois parties : A et B livrées ; C, assistant GLOMARI Care et studio des fiches produits.
+Les 21 et 22 novembre 2026, d'après `docs/Fiche technique globale GLOMARI.md` : lot 0, points 1 à 3 (contrôle GitHub `verification.yml`, lieux de GLOMARI par `npm run provisionner:glomari`, import des clients), lot 1 (canal en ligne) et lot 2 (paiement Mobile Money, avec le prestataire factice) livrés. Le 23 novembre 2026, lot 3 partie A (précommandes d'arrivage avec acompte) livré, puis partie B (achats à l'import : acomptes au fournisseur, devises, dépôt-vente, couverture de stock), puis lot 4 partie A (messages automatiques aux clients avec un prestataire factice, avis publiés par article), puis partie B (comptes clients en ligne par code SMS). Le lot 4 est découpé en trois parties : A et B livrées.
+
+Le lot 4C (assistant GLOMARI Care et studio des fiches de vente) est développé sur sa branche. La validation d’intégration et la recette avec une IA réelle restent à faire.
+
+- Assistant GLOMARI Care et fiches de vente (`src/care.ts`, `src/fichesvente.ts`, migration 0053) :
+  - Le contexte transmis à l’IA comprend les réponses validées, les données publiques de la boutique et les commandes autorisées. La recherche d’articles se fait par mots. L’appel à l’IA se fait hors transaction, avec un délai de 9 secondes pour l’assistant.
+  - Un repli propose un conseiller si l’IA est indisponible ou sans réponse. Une demande de remboursement ou une promesse détectée déclenche une réponse fixe et une proposition de relais par ticket. Les conseillers qui ont le rôle Service client retrouvent le fil dans le ticket.
+  - L’indicateur compte les conversations closes, transmises et ouvertes ainsi que les avis. Une conversation inactive depuis 30 minutes est close. Les conversations non transmises sont purgées après 12 mois et les messages du client sont effacés à l’anonymisation de sa fiche.
+  - Le studio garde les versions des textes de vente. Le catalogue expose le texte publié dans `vente` et conserve le nom de l’article.
+  - La fenêtre publique relève de W8 dans `glomari-web`. L’objectif de 80 % de conversations closes sans conseiller se vérifie sur le serveur d’essai avec l’IA réelle.
 
 À faire ensuite :
 1. Essai privé sur un serveur : construction de l'image Docker, HTTPS, tâches planifiées et restauration d'une sauvegarde, jamais essayés.
@@ -47,7 +56,7 @@ Les 21 et 22 novembre 2026, d'après `docs/Fiche technique globale GLOMARI.md` :
 4. Avant d'ouvrir les précommandes au public : faire relire par un juriste le texte des conditions (`conditionsPrecommande`, acompte conservé si le solde n'est pas payé à temps).
 5. Faire confirmer par l'expert-comptable les comptes du lot 3B (avances fournisseurs 4091, achats du dépôt-vente 6011) et le traitement des écarts de change.
 6. Choix du prestataire SMS et WhatsApp par la direction, puis son branchement (un fichier dans `src/`, identifiants dans `.env`, modèles WhatsApp à faire approuver), sans toucher au reste du lot 4A.
-7. Lot 4, partie C (assistant GLOMARI Care, studio des fiches produits). Côté Marketplace (`glomari-web`, W6), construire l'espace client sur les routes `/marketplace/:org/compte/…`.
+7. Valider le lot 4C sur GitHub et dérouler la recette sur le serveur d’essai. Côté Marketplace (`glomari-web`), construire l’espace client (W6) et la fenêtre de l’assistant (W8).
 
 Limites connues :
 - Vente hors connexion : un caissier peut encore faire passer le stock en négatif, chaque dépassement va au journal (`caisse.stock_negatif`).
