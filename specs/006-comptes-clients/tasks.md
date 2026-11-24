@@ -169,9 +169,9 @@ description: "Liste des tâches des comptes clients en ligne de GLOMARI (lot 4, 
   - aucune donnée de GTA ;
   - aucun appel réseau dans les tests ;
   - la règle « aucun nom déclaré deux fois » des écrans respectée.
-- [ ] T029 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
-- [ ] T030 Dérouler les scénarios de `specs/006-comptes-clients/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera).
-- [ ] T031 Après la fusion de la demande n° 9 et avec l'accord du responsable technique, remettre la branche sur `main`, la pousser, ouvrir la demande de fusion et attendre le contrôle GitHub au vert.
+- [X] T029 Lancer `npx tsc --noEmit` et la suite complète avec le rôle restreint par le contrôle GitHub (`.github/workflows/verification.yml`) : tout vert.
+- [X] T030 Dérouler les scénarios de `specs/006-comptes-clients/quickstart.md` (automatisés par les tests ; essai privé sur serveur quand il existera).
+- [X] T031 Après la fusion de la demande n° 9 et avec l'accord du responsable technique, remettre la branche sur `main`, la pousser, ouvrir la demande de fusion et attendre le contrôle GitHub au vert.
 
 ---
 
