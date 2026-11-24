@@ -120,7 +120,7 @@ export function enregistrerComptesClients(app: FastifyInstance, pool: pg.Pool, o
       const recu = Buffer.from(empreinteCode(options.cleSecrets, b.org, telephone, req.body.code), "hex");
       if (!timingSafeEqual(attendu, recu)) {
         const essais = Number(k.essais) + 1;
-        await c.query("update codes_connexion set essais = $2, invalide_le = case when $2 >= $3 then now() end where id = $1", [k.id, essais, ESSAIS_MAX_CODE]);
+        await c.query("update codes_connexion set essais = $2::int, invalide_le = case when $3::boolean then now() end where id = $1", [k.id, essais, essais >= ESSAIS_MAX_CODE]);
         if (essais >= ESSAIS_MAX_CODE) await c.query("select journal_evenement('compte_client.blocage', $1)", [JSON.stringify({ code: k.id })]);
         return { refus: new ErreurApi(401, "code_incorrect", { essais_restants: Math.max(ESSAIS_MAX_CODE - essais, 0) }) };
       }
@@ -151,10 +151,9 @@ export function enregistrerComptesClients(app: FastifyInstance, pool: pg.Pool, o
     parBoutique(pool, req.params.org, async (c, b) => {
       const s = await clientConnecte(c, b, req);
       const tous = req.body?.tous === true;
-      const { rowCount } = await c.query(
-        `update sessions_clients set revoque_le = now() where revoque_le is null and ${tous ? "tiers_id = $1" : "id = $2"}`,
-        tous ? [s.tiers_id] : [null, s.id],
-      );
+      const { rowCount } = tous
+        ? await c.query("update sessions_clients set revoque_le = now() where revoque_le is null and tiers_id = $1", [s.tiers_id])
+        : await c.query("update sessions_clients set revoque_le = now() where revoque_le is null and id = $1", [s.id]);
       if (tous) await c.query("select journal_evenement('compte_client.deconnexion_tous', $1)", [JSON.stringify({ tiers: s.tiers_id, par: "client" })]);
       return { deconnecte: true, sessions: rowCount ?? 0 };
     }),
@@ -180,6 +179,8 @@ export function enregistrerComptesClients(app: FastifyInstance, pool: pg.Pool, o
   }, async (req) =>
     parBoutique(pool, req.params.org, async (c, b) => {
       const s = await clientConnecte(c, b, req);
+      // Les champs inconnus (le téléphone, par exemple) sont retirés à la lecture : il doit rester le nom ou l'e-mail.
+      if (req.body.nom === undefined && req.body.email === undefined) throw new ErreurApi(400, "donnees_invalides");
       const nom = req.body.nom?.trim();
       if (nom !== undefined && nom.length < 2) throw new ErreurApi(400, "donnees_invalides");
       const { rows: [t] } = await c.query(
