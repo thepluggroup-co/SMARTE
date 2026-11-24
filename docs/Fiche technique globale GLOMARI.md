@@ -314,6 +314,8 @@ Paiement à la livraison : reservee ──(confirmation interne)──► colis 
 | `POST /marketplace/:org/precommandes/:reference/payer` | Lance le paiement Mobile Money de l'acompte | Lot 3A |
 | `GET /marketplace/:org/precommandes/:reference?jeton=…` | Suivi de la précommande : statut, étapes de l'arrivage, solde et son délai | Lot 3A |
 | `POST /marketplace/:org/precommandes/:reference/solde` | Choix de la remise et création de la commande du solde, acompte déduit ; elle se paie par la route de paiement des commandes | Lot 3A |
+| `POST /marketplace/:org/compte/code` et `POST /marketplace/:org/compte/connexion` | Code de connexion par SMS, puis session de 7 jours (en-tête `Authorization: Client <jeton>`) | Lot 4B |
+| `GET /marketplace/:org/compte`, `…/commandes`, `…/precommandes`, `…/fidelite`, `POST …/precommandes/:reference/solde`, `…/adresses` (lecture, ajout, modification, suppression), `PATCH …/compte`, `POST …/deconnexion` | Espace client : historique, solde d'une précommande, adresses, profil, fidélité, déconnexion | Lot 4B |
 | `POST /marketplace/:org/care/messages` | Conversation avec l'assistant Care | Lot 4 |
 | `GET /capture/:code` et `POST /capture/:code` | Formulaires du site web → CRM | Existant |
 | `GET /offre-public/:code` et `POST /offre-public/:code` | Offres d'emploi et candidatures | Existant |
@@ -543,7 +545,12 @@ Recette : 80 % des questions courantes réglées sans humain sur 100 conversatio
   - « prêt à retirer » seulement pour une commande en agence de voyage ou en point relais ;
   - la demande d'avis porte sur toute la commande et se note article par article ; les colis de la Marketplace étant créés sans leur facture, le client et les articles se lisent par la commande en ligne ;
   - avis publics : `GET /marketplace/:org/produits/:id/avis`, moyenne dans le catalogue.
-- **Partie B (comptes clients en ligne par code SMS, point 3)** : à faire.
+- **Partie B (comptes clients en ligne par code SMS, point 3) livrée** :
+  - fichiers : migration `0052_comptes_clients.sql`, `src/comptesclients.ts` ; spécification `specs/006-comptes-clients/` ;
+  - code à six chiffres envoyé aussitôt, gardé par une empreinte à clé, 10 minutes, cinq essais ; limites par numéro et débit de la boutique ;
+  - session de 7 jours (choix du 23 novembre 2026), révocable sur un appareil, sur tous, ou par l'équipe Care ;
+  - historique des commandes en ligne et des précommandes, sans les achats en caisse (choix du 23 novembre 2026) ; solde payable depuis l'espace ; adresses et fidélité ;
+  - l'espace client s'affiche dans `glomari-web` (W6) ; le code d'essai se lit dans l'ERP avec le prestataire factice seulement.
 - **Partie C (assistant GLOMARI Care et studio des fiches produits, points 4 et 5)** : à faire.
 
 ### Lot 5 · Réseau et indicateurs (phase 2, 2029)

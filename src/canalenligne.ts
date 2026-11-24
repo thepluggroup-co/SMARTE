@@ -74,18 +74,56 @@ export function parBoutique<T>(pool: pg.Pool, org: string, fn: (c: Client, b: Bo
   });
 }
 
+/**
+ * La fiche d'un numéro dans la branche : toujours la même (la plus ancienne non archivée), pour la commande en ligne,
+ * la précommande et le compte client.
+ */
+export async function trouverFicheClient(c: Client, branche: string, telephone: string): Promise<string | null> {
+  const { rows: [t] } = await c.query(
+    "select id from tiers where telephone = $1 and not archive and branche_id = $2 order by cree_le, id limit 1", [telephone, branche],
+  );
+  return t?.id ?? null;
+}
+
 /** Même règle que le client rapide de la caisse : un numéro déjà connu dans la branche rend sa fiche. */
 export async function ficheClient(c: Client, b: Boutique, lieuId: string, nom: string, telephone: string): Promise<string> {
   // Deux commandes simultanées d'un nouveau client ne créent qu'une fiche.
   await c.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`tiers:${b.branche}:${telephone}`]);
-  const { rows: [t] } = await c.query("select id from tiers where telephone = $1 and not archive and branche_id = $2 limit 1", [telephone, b.branche]);
-  if (t) return t.id;
+  const existante = await trouverFicheClient(c, b.branche, telephone);
+  if (existante) return existante;
   const { rows: [n] } = await c.query(
     "insert into tiers (organisation_id, type, nom, telephone, roles, entite_origine_id, branche_id) values ($1, 'personne', $2, $3, '{client}', $4, $5) returning id",
     [b.org, nom, telephone, lieuId, b.branche],
   );
   await publierEvenement(c, "tiers.cree", { id: n.id });
   return n.id;
+}
+
+/** Une commande en ligne telle que son client la voit : jamais de coût, de jeton ni de donnée d'un autre client. */
+export async function detailCommandeWeb(c: Client, b: Boutique, id: string, urlPublique: string) {
+  const { rows: [w] } = await c.query(
+    `select w.id, w.reference, w.statut, l.nom_public as lieu, w.mode_livraison, z.nom as zone, r.nom as point_relais, w.moyen_paiement,
+       w.frais_livraison, w.total_ttc, w.acompte, w.expire_le, w.cree_le, k.statut as colis_statut, k.code_suivi
+     from commandes_web w
+     left join lieux_canal l on l.config_id = $2 and l.entite_id = w.lieu_id
+     left join zones_livraison z on z.id = w.zone_id
+     left join points_relais r on r.id = w.point_relais_id
+     left join colis k on k.id = w.colis_id
+     where w.id = $1 and w.entite_id = $3`,
+    [id, b.configId, b.branche],
+  );
+  if (!w) return null;
+  const { rows: lignes } = await c.query(
+    "select p.nom, l.quantite, l.prix_unitaire_ttc, l.total_ttc from lignes_commande_web l join produits p on p.id = l.produit_id where l.commande_id = $1 order by p.nom",
+    [w.id],
+  );
+  return {
+    reference: w.reference, statut: w.statut, lieu: w.lieu, mode_livraison: w.mode_livraison, zone: w.zone, point_relais: w.point_relais,
+    moyen_paiement: w.moyen_paiement, frais_livraison: w.frais_livraison, total_ttc: w.total_ttc,
+    // Solde d'une précommande : l'acompte déjà versé est déduit du montant à payer.
+    acompte: w.acompte, montant_a_payer: w.total_ttc - w.acompte, expire_le: w.expire_le, cree_le: w.cree_le,
+    lignes, colis: w.colis_statut ? { statut: w.colis_statut, lien_suivi: `${urlPublique}/suivi.html?c=${b.org}.${w.code_suivi}` } : null,
+  };
 }
 
 /** Règles du mode de remise, communes à la commande et au solde d'une précommande. Renvoie l'adresse retenue. */
@@ -418,28 +456,11 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
     if (!REFERENCE.test(req.params.reference) || !JETON.test(jeton)) throw new ErreurApi(404, "introuvable");
     return parBoutique(pool, req.params.org, async (c, b) => {
       const { rows: [w] } = await c.query(
-        `select w.id, w.reference, w.statut, l.nom_public as lieu, w.mode_livraison, z.nom as zone, r.nom as point_relais, w.moyen_paiement,
-           w.frais_livraison, w.total_ttc, w.acompte, w.expire_le, w.cree_le, k.statut as colis_statut, k.code_suivi
-         from commandes_web w
-         left join lieux_canal l on l.config_id = $3 and l.entite_id = w.lieu_id
-         left join zones_livraison z on z.id = w.zone_id
-         left join points_relais r on r.id = w.point_relais_id
-         left join colis k on k.id = w.colis_id
-         where w.reference = $1 and w.jeton_suivi_hache = $2 and w.entite_id = $4`,
-        [req.params.reference, hacherJeton(jeton), b.configId, b.branche],
+        "select id from commandes_web where reference = $1 and jeton_suivi_hache = $2 and entite_id = $3", [req.params.reference, hacherJeton(jeton), b.branche],
       );
-      if (!w) throw new ErreurApi(404, "introuvable");
-      const { rows: lignes } = await c.query(
-        "select p.nom, l.quantite, l.prix_unitaire_ttc, l.total_ttc from lignes_commande_web l join produits p on p.id = l.produit_id where l.commande_id = $1 order by p.nom",
-        [w.id],
-      );
-      return {
-        reference: w.reference, statut: w.statut, lieu: w.lieu, mode_livraison: w.mode_livraison, zone: w.zone, point_relais: w.point_relais,
-        moyen_paiement: w.moyen_paiement, frais_livraison: w.frais_livraison, total_ttc: w.total_ttc,
-        // Solde d'une précommande : l'acompte déjà versé est déduit du montant à payer.
-        acompte: w.acompte, montant_a_payer: w.total_ttc - w.acompte, expire_le: w.expire_le, cree_le: w.cree_le,
-        lignes, colis: w.colis_statut ? { statut: w.colis_statut, lien_suivi: lienColis(b.org, w.code_suivi) } : null,
-      };
+      const detail = w ? await detailCommandeWeb(c, b, w.id, urlPublique) : null;
+      if (!detail) throw new ErreurApi(404, "introuvable");
+      return detail;
     });
   });
 

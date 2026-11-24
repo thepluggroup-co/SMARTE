@@ -51,12 +51,12 @@ export interface MessageAEnvoyer { canal: Canal; telephone: string; texte: strin
 export interface PrestataireMessages { nom: string; envoyer(m: MessageAEnvoyer): Promise<{ ok: boolean; reference?: string }> }
 
 /** Essai privé et tests seulement : rien ne part ; les messages restent en mémoire, et une panne se simule. */
-export function prestataireMessagesFactice(): PrestataireMessages & { envoyes: MessageAEnvoyer[]; enPanne: boolean } {
+export function prestataireMessagesFactice(): PrestataireMessages & { envoyes: (MessageAEnvoyer & { le: Date })[]; enPanne: boolean } {
   const p = {
-    nom: "factice", envoyes: [] as MessageAEnvoyer[], enPanne: false,
+    nom: "factice", envoyes: [] as (MessageAEnvoyer & { le: Date })[], enPanne: false,
     async envoyer(m: MessageAEnvoyer) {
       if (p.enPanne) return { ok: false };
-      p.envoyes.push(m);
+      p.envoyes.push({ ...m, le: new Date() });
       if (p.envoyes.length > 1000) p.envoyes.shift();
       return { ok: true, reference: `factice-${m.reference}` };
     },
@@ -456,6 +456,32 @@ export function enregistrerMessages(app: FastifyInstance, pool: pg.Pool, outils:
         [q.brancheId],
       );
       return { messages: rows.map((m) => ({ ...m, libelle: TYPES_MESSAGES[m.type as TypeMessage].libelle })), mois };
+    }),
+  );
+
+  /**
+   * Essai privé seulement : avec le prestataire factice, aucun SMS ne part ; le responsable technique lit ici le dernier code
+   * de connexion envoyé à un numéro. Le code n'est lu que dans la mémoire du prestataire, jamais en base ni dans un journal.
+   */
+  app.get<{ Querystring: { telephone: string } }>("/messages/code-essai", {
+    schema: { querystring: { type: "object", required: ["telephone"], properties: { telephone: { type: "string", minLength: 1, maxLength: 30 } } } },
+  }, async (req) =>
+    protege(req, async (ctx) => {
+      if (!prestataire || !("envoyes" in prestataire)) throw new ErreurApi(404, "introuvable");
+      await outils.exiger(ctx, "entites.gerer");
+      const telephone = mobileCamerounais(req.query.telephone);
+      if (!telephone) throw new ErreurApi(400, "numero_invalide");
+      const envoyes = (prestataire as ReturnType<typeof prestataireMessagesFactice>).envoyes;
+      for (const m of [...envoyes].reverse()) {
+        const code = /code de connexion est ([0-9]{6})/.exec(m.texte)?.[1];
+        if (m.telephone !== telephone || !code) continue;
+        // La référence est le code enregistré : il doit être de cette organisation et d'une branche où l'on gère les entités.
+        const { rows: [k] } = await ctx.client.query("select branche_id from codes_connexion where id = $1", [m.reference]);
+        if (!k) continue;
+        await exigerSurEntite(ctx, "entites.gerer", k.branche_id);
+        return { code, envoye_le: m.le };
+      }
+      throw new ErreurApi(404, "introuvable");
     }),
   );
 

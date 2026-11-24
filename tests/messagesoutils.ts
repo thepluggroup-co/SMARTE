@@ -5,9 +5,12 @@ import { environnement } from "./outils.js";
 import { boutiquePayante, payerEtConfirmer, SECRET } from "./paiementoutils.js";
 
 /** Prestataire de paiement et prestataire de messages factices : aucun appel réseau. */
-export async function environnementMessages() {
+export async function environnementMessages(debits: { codes?: number; connexions?: number } = {}) {
   const factice = prestataireMessagesFactice();
-  const env = await environnement({ prestatairesPaiement: [prestataireFactice(SECRET)], debitCanal: { commandes: 1000, paiements: 1000 }, prestataireMessages: factice });
+  const env = await environnement({
+    prestatairesPaiement: [prestataireFactice(SECRET)], prestataireMessages: factice,
+    debitCanal: { commandes: 1000, paiements: 1000, codes: 1000, connexions: 1000, ...debits },
+  });
   return { ...env, factice };
 }
 type EnvM = Awaited<ReturnType<typeof environnementMessages>>;

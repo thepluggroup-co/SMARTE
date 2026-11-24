@@ -56,6 +56,13 @@ La deuxième commande de provisionnement crée sous GLOMARI les lieux « GLOMARI
 - Le prestataire réel se branche après le choix de la direction (identifiants dans `.env`, jamais dans le dépôt). Pour WhatsApp, faire approuver à l'avance les modèles de messages, dont les textes sont fixés dans `src/messages.ts`.
 - L'équipe Care suit le journal : un message en échec ou « sans numéro » se renvoie, au besoin avec le bon numéro.
 
+## Comptes clients (lot 4B)
+
+- La connexion des clients passe par un code SMS : elle demande le prestataire de messages. Avant l'ouverture au public, brancher le prestataire réel.
+- Essai privé avec `ERP_MESSAGES_FACTICE=1` : aucun SMS ne part ; un compte qui gère les entités lit le code dans « Messages aux clients » › « Code d'essai ».
+- Débits de la boutique (le serveur de la Marketplace appelle l'ERP depuis une seule adresse) : `ERP_CANAL_CODES_PAR_MINUTE` (30 par défaut) et `ERP_CANAL_CONNEXIONS_PAR_MINUTE` (60), à relever avant l'ouverture au public si besoin.
+- Un client qui a perdu son téléphone : depuis sa fiche, l'équipe Care choisit « Déconnecter tous ses appareils ».
+
 ## Sauvegardes
 
 ```cron

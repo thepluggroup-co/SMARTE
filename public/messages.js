@@ -11,6 +11,16 @@ const RAISONS_MESSAGE_CLIENT = {
   desactive: "type de message coupé", ne_pas_contacter: "le client ne souhaite pas être contacté", sans_objet: "message devenu sans objet",
 };
 
+/** Essai privé : sans vrai SMS, le dernier code de connexion d'un numéro se lit ici. Rien de tel avec un vrai prestataire. */
+function blocCodeEssai() {
+  const resultat = h("div");
+  return h("details", { class: "carte" }, h("summary", {}, "Code d'essai (connexion d'un client, essai privé)"),
+    formulaire(async (v) => {
+      const r = await api("GET", `/messages/code-essai?telephone=${encodeURIComponent(v.telephone.trim())}`);
+      resultat.replaceChildren(h("p", {}, "Dernier code envoyé : ", h("b", {}, r.code), ` (${heure(r.envoye_le)})`));
+    }, [champ("Numéro du client", { name: "telephone", type: "tel", required: true })], "Lire le code"), resultat);
+}
+
 async function ecranMessagesClients(message, brancheId, filtres = {}) {
   const branches = (await api("GET", "/entites")).filter((e) => e.type === "branche" && e.domaine === "commerce");
   const b = brancheId || branches[0]?.id;
@@ -25,6 +35,7 @@ async function ecranMessagesClients(message, brancheId, filtres = {}) {
     h("p", { class: "discret-texte" }, `Les messages partent seuls après chaque étape (colis, précommandes, demande d'avis), entre ${reglages.heures.debut} h et ${reglages.heures.fin} h, heure de Douala. Un message raté est tenté trois fois en une heure.`),
     reglages.prestataire ? null : h("div", { class: "alerte-caisse", role: "status" }, "Aucun prestataire de SMS ni de WhatsApp n'est configuré : les messages attendent dans la file."),
     reglages.prestataire === "factice" ? h("div", { class: "alerte-caisse", role: "status" }, "Prestataire factice : essai privé seulement, aucun message ne part réellement.") : null,
+    reglages.prestataire === "factice" && droits.includes("entites.gerer") ? blocCodeEssai() : null,
     branches.length > 1 ? h("div", { class: "carte" }, formulaire(async (v) => ecranMessagesClients(null, v.brancheId),
       [choix("brancheId", "Branche", branches.map((x) => [x.id, x.nom]), b)], "Afficher")) : null,
     h("div", { class: "carte" }, h("h2", {}, "Types de messages"),

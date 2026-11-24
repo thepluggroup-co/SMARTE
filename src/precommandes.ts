@@ -3,7 +3,7 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import pg from "pg";
 import { dansOrganisation, publierEvenement, type Client } from "./base.js";
 import { creerCommandeAchat, crochetsAchats } from "./achats.js";
-import { DUREE_RESERVATION_MINUTES, ficheClient, fraisLivraison, parBoutique, verifierLivraison } from "./canalenligne.js";
+import { DUREE_RESERVATION_MINUTES, ficheClient, fraisLivraison, parBoutique, verifierLivraison, type Boutique, type ChoixLivraison } from "./canalenligne.js";
 import { calculerLigne } from "./facturation.js";
 import { prochainNumero } from "./formations.js";
 import { confierAuxTitulaires } from "./performance.js";
@@ -321,6 +321,83 @@ function calculerPrix(prixTtc: number, taux: number, acompteType: string, acompt
   const acompte = acompteUnitaire(acompteType, acompteValeur, prixTtc);
   if (acompte < 1 || acompte >= prixTtc) throw new ErreurApi(400, "acompte_invalide");
   return { prixHt: r.ht, acompte };
+}
+
+/**
+ * Une précommande telle que son client la voit, par son lien de suivi ou depuis son compte. Ni nom ni téléphone :
+ * les étapes ne disent ni le fournisseur, ni le transitaire, ni les notes. `i` porte la campagne (`campagne`) et le nom de l'article.
+ */
+export async function detailPrecommande(c: Client, i: Record<string, any>) {
+  const k = i.campagne as Campagne;
+  const q = await quantites(c, k);
+  const etapes: { etape: string; date: string }[] = [];
+  if (k.commande_achat_id) {
+    const { rows: [a] } = await c.query("select (approuve_le at time zone 'Africa/Douala')::date::text as approuve from commandes_achat where id = $1", [k.commande_achat_id]);
+    if (a?.approuve) {
+      etapes.push({ etape: "commandee", date: a.approuve });
+      const { rows } = await c.query(
+        "select etape, date_etape::text as date from etapes_achat where commande_id = $1 and etape <> 'commandee' order by date_etape, cree_le", [k.commande_achat_id],
+      );
+      etapes.push(...rows);
+    }
+  }
+  const { rows: [w] } = await c.query(
+    "select reference, statut, total_ttc, acompte from commandes_web where inscription_id = $1 and statut <> 'annulee' order by cree_le desc limit 1", [i.id],
+  );
+  return {
+    reference: i.reference, statut: i.statut, motif: i.motif ? MOTIFS[i.motif] : null,
+    campagne: { titre: k.titre, statut: k.statut, date_limite: k.date_limite, progression: q.progression },
+    produit: i.produit, quantite: i.quantite, total_ttc: Number(i.total_ttc), acompte: Number(i.acompte), moyen_paiement: i.moyen_paiement,
+    ...(i.statut === "en_attente" ? { expire_le: i.expire_le } : {}),
+    etapes,
+    ...(i.statut === "servie" ? { solde: { montant: Number(i.total_ttc) - Number(i.acompte), avant: i.solde_avant } } : {}),
+    ...(w ? { commande_solde: { reference: w.reference, statut: w.statut, montant_a_payer: Number(w.total_ttc) - Number(w.acompte) } } : {}),
+    conditions: i.conditions_texte,
+  };
+}
+
+/**
+ * Le solde se paie par une commande en ligne qui porte l'acompte ; la réservation reste sur l'inscription.
+ * Commun au lien de suivi et au compte client. Rend la commande du solde avec son jeton, pour la payer.
+ */
+export async function creerCommandeSolde(c: Client, bq: Boutique, inscriptionId: string, b: ChoixLivraison & { moyenPaiement: string }) {
+  const adresse = verifierLivraison(b);
+  const jeton = randomBytes(32).toString("base64url");
+  // La commande du solde avant l'inscription : le même ordre que la réception d'un avis de paiement.
+  const { rows: anciennes } = await c.query("select id, reference, statut from commandes_web where inscription_id = $1 and statut <> 'annulee' order by cree_le for update", [inscriptionId]);
+  const { rows: [i] } = await c.query("select *, solde_avant > now() as dans_le_delai from inscriptions_precommande where id = $1 for update", [inscriptionId]);
+  // Un solde déjà payé ne se paie pas deux fois ; une commande remplacée puis payée trop tard, elle, est à rembourser.
+  if (i.statut !== "servie" || !i.dans_le_delai || anciennes.some((w) => ["payee", "facturee", "expediee", "livree"].includes(w.statut))) {
+    throw new ErreurApi(409, "solde_impossible");
+  }
+  const frais = await fraisLivraison(c, bq.branche, b);
+  for (const w of anciennes.filter((y) => y.statut === "reservee")) {
+    await c.query("update commandes_web set statut = 'annulee', motif = 'Remplacée par un autre choix de livraison', traite_le = now() where id = $1", [w.id]);
+    await publierEvenement(c, "commande_web.annulee", { id: w.id, reference: w.reference, motif: "remplacee" });
+  }
+  const { rows: [k] } = await c.query("select * from campagnes_arrivage where id = $1", [i.campagne_id]);
+  const m = calculerLigne(i.quantite, Number(k.prix_ht), 0, Number(k.taux_taxe));
+  const totalTtc = m.ht + m.taxes + frais;
+  const reference = await prochainNumero(c, `WEB-${anneeDouala()}`);
+  const { rows: [w] } = await c.query(
+    `insert into commandes_web (organisation_id, entite_id, lieu_id, tiers_id, reference, jeton_suivi_hache, nom_client, telephone, mode_livraison,
+       zone_id, point_relais_id, adresse, moyen_paiement, frais_livraison, total_ht, total_ttc, expire_le, inscription_id, acompte)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) returning id, expire_le`,
+    [bq.org, bq.branche, k.lieu_id, i.tiers_id, reference, hacherJeton(jeton), i.nom_client, i.telephone, b.modeLivraison,
+      b.zoneId ?? null, b.pointRelaisId ?? null, adresse, b.moyenPaiement, frais, m.ht, totalTtc, i.solde_avant, i.id, i.acompte],
+  );
+  await c.query(
+    `insert into lignes_commande_web (organisation_id, commande_id, produit_id, quantite, prix_unitaire_ht, prix_unitaire_ttc, taux_taxe, total_ht, total_ttc)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [bq.org, w.id, k.produit_id, i.quantite, k.prix_ht, k.prix_ttc, k.taux_taxe, m.ht, m.ht + m.taxes],
+  );
+  await publierEvenement(c, "commande_web.creee", { id: w.id, reference, total_ttc: totalTtc });
+  return {
+    commande: {
+      reference, jeton, suivi: `/marketplace/${bq.org}/commandes/${reference}?jeton=${jeton}`,
+      total_ttc: totalTtc, acompte: Number(i.acompte), montant_a_payer: totalTtc - Number(i.acompte), frais_livraison: frais, expire_le: w.expire_le,
+    },
+  };
 }
 
 export function enregistrerPrecommandes(app: FastifyInstance, pool: pg.Pool, outils: Outils, taches: TachePlanifiee[], options: { commandesParMinute: number }): void {
@@ -692,32 +769,7 @@ export function enregistrerPrecommandes(app: FastifyInstance, pool: pg.Pool, out
         [req.params.reference, hacherJeton(jeton), b.branche],
       );
       if (!i) throw new ErreurApi(404, "introuvable");
-      const k = i.campagne as Campagne;
-      const q = await quantites(c, k);
-      const etapes: { etape: string; date: string }[] = [];
-      if (k.commande_achat_id) {
-        const { rows: [a] } = await c.query("select (approuve_le at time zone 'Africa/Douala')::date::text as approuve from commandes_achat where id = $1", [k.commande_achat_id]);
-        if (a?.approuve) {
-          etapes.push({ etape: "commandee", date: a.approuve });
-          const { rows } = await c.query(
-            "select etape, date_etape::text as date from etapes_achat where commande_id = $1 and etape <> 'commandee' order by date_etape, cree_le", [k.commande_achat_id],
-          );
-          etapes.push(...rows);
-        }
-      }
-      const { rows: [w] } = await c.query(
-        "select reference, statut, total_ttc, acompte from commandes_web where inscription_id = $1 and statut <> 'annulee' order by cree_le desc limit 1", [i.id],
-      );
-      return {
-        reference: i.reference, statut: i.statut, motif: i.motif ? MOTIFS[i.motif] : null,
-        campagne: { titre: k.titre, statut: k.statut, date_limite: k.date_limite, progression: q.progression },
-        produit: i.produit, quantite: i.quantite, total_ttc: Number(i.total_ttc), acompte: Number(i.acompte), moyen_paiement: i.moyen_paiement,
-        ...(i.statut === "en_attente" ? { expire_le: i.expire_le } : {}),
-        etapes,
-        ...(i.statut === "servie" ? { solde: { montant: Number(i.total_ttc) - Number(i.acompte), avant: i.solde_avant } } : {}),
-        ...(w ? { commande_solde: { reference: w.reference, statut: w.statut, montant_a_payer: Number(w.total_ttc) - Number(w.acompte) } } : {}),
-        conditions: i.conditions_texte,
-      };
+      return detailPrecommande(c, i);
     });
   });
 
@@ -737,8 +789,7 @@ export function enregistrerPrecommandes(app: FastifyInstance, pool: pg.Pool, out
     }, async (req, reponse) => {
       const b = req.body;
       if (!REFERENCE.test(req.params.reference) || !JETON.test(b.jeton)) throw new ErreurApi(404, "introuvable");
-      const adresse = verifierLivraison(b);
-      const jeton = randomBytes(32).toString("base64url");
+      verifierLivraison(b);
       const r = await parBoutique(pool, req.params.org, async (c, bq) => {
         await expirerPrecommandes(c);
         const { rows: [x] } = await c.query(
@@ -747,41 +798,7 @@ export function enregistrerPrecommandes(app: FastifyInstance, pool: pg.Pool, out
           [req.params.reference, hacherJeton(b.jeton), bq.branche],
         );
         if (!x) throw new ErreurApi(404, "introuvable");
-        // La commande du solde avant l'inscription : le même ordre que la réception d'un avis de paiement.
-        const { rows: anciennes } = await c.query("select id, reference, statut from commandes_web where inscription_id = $1 and statut <> 'annulee' order by cree_le for update", [x.id]);
-        const { rows: [i] } = await c.query("select *, solde_avant > now() as dans_le_delai from inscriptions_precommande where id = $1 for update", [x.id]);
-        // Un solde déjà payé ne se paie pas deux fois ; une commande remplacée puis payée trop tard, elle, est à rembourser.
-        if (i.statut !== "servie" || !i.dans_le_delai || anciennes.some((w) => ["payee", "facturee", "expediee", "livree"].includes(w.statut))) {
-          throw new ErreurApi(409, "solde_impossible");
-        }
-        const frais = await fraisLivraison(c, bq.branche, b);
-        for (const w of anciennes.filter((y) => y.statut === "reservee")) {
-          await c.query("update commandes_web set statut = 'annulee', motif = 'Remplacée par un autre choix de livraison', traite_le = now() where id = $1", [w.id]);
-          await publierEvenement(c, "commande_web.annulee", { id: w.id, reference: w.reference, motif: "remplacee" });
-        }
-        const { rows: [k] } = await c.query("select * from campagnes_arrivage where id = $1", [i.campagne_id]);
-        const m = calculerLigne(i.quantite, Number(k.prix_ht), 0, Number(k.taux_taxe));
-        const totalTtc = m.ht + m.taxes + frais;
-        const reference = await prochainNumero(c, `WEB-${anneeDouala()}`);
-        const { rows: [w] } = await c.query(
-          `insert into commandes_web (organisation_id, entite_id, lieu_id, tiers_id, reference, jeton_suivi_hache, nom_client, telephone, mode_livraison,
-             zone_id, point_relais_id, adresse, moyen_paiement, frais_livraison, total_ht, total_ttc, expire_le, inscription_id, acompte)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) returning id, expire_le`,
-          [bq.org, bq.branche, k.lieu_id, i.tiers_id, reference, hacherJeton(jeton), i.nom_client, i.telephone, b.modeLivraison,
-            b.zoneId ?? null, b.pointRelaisId ?? null, adresse, b.moyenPaiement, frais, m.ht, totalTtc, i.solde_avant, i.id, i.acompte],
-        );
-        await c.query(
-          `insert into lignes_commande_web (organisation_id, commande_id, produit_id, quantite, prix_unitaire_ht, prix_unitaire_ttc, taux_taxe, total_ht, total_ttc)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [bq.org, w.id, k.produit_id, i.quantite, k.prix_ht, k.prix_ttc, k.taux_taxe, m.ht, m.ht + m.taxes],
-        );
-        await publierEvenement(c, "commande_web.creee", { id: w.id, reference, total_ttc: totalTtc });
-        return {
-          commande: {
-            reference, jeton, suivi: `/marketplace/${bq.org}/commandes/${reference}?jeton=${jeton}`,
-            total_ttc: totalTtc, acompte: Number(i.acompte), montant_a_payer: totalTtc - Number(i.acompte), frais_livraison: frais, expire_le: w.expire_le,
-          },
-        };
+        return creerCommandeSolde(c, bq, x.id, b);
       });
       return reponse.status(201).send(r);
     },

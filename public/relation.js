@@ -165,8 +165,21 @@ async function ecranOpportunite(o) {
       }, [choix("type", "Type", [["appel", "Appel"], ["whatsapp", "WhatsApp"], ["email", "E-mail"], ["visite", "Visite"], ["note", "Note"]]), champ("Résumé", { name: "contenu", required: true })], "Enregistrer l'échange")),
     ] : null,
     formFiche(fiche, () => recharger("Fiche modifiée.")),
+    blocCompteEnLigne(fiche, (m) => recharger(m)),
     histo,
   );
+}
+
+/** Le compte de la Marketplace : appareils connectés ; à la demande du client, l'équipe Care les déconnecte tous. */
+function blocCompteEnLigne(t, retour) {
+  const c = t.compte_en_ligne;
+  if (!c?.derniere_connexion) return null;
+  return h("div", { class: "carte" }, h("h2", {}, "Compte en ligne"),
+    h("p", {}, `${c.appareils} appareil${c.appareils > 1 ? "s" : ""} connecté${c.appareils > 1 ? "s" : ""} · dernière connexion le ${heure(c.derniere_connexion)}`),
+    droits.includes("care.gerer") && c.appareils ? h("button", { class: "discret", onclick: async () => {
+      const r = await api("POST", `/tiers/${t.id}/comptes-en-ligne/deconnexion`);
+      retour(`${r.sessions} appareil(s) déconnecté(s) : le client devra demander un nouveau code.`);
+    } }, "Déconnecter tous ses appareils") : null);
 }
 
 const pastilleTicket = (k) => k.en_retard ? h("span", { class: "pastille retard" }, "En retard")

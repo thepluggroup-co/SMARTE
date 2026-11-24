@@ -371,6 +371,12 @@ const MESSAGES = {
   renvoi_impossible: "Ce message ne peut pas être renvoyé : il n'est ni en échec ni sans numéro, ou un renvoi attend déjà.",
   article_hors_commande: "Cet article ne fait pas partie de la commande à noter.",
   numero_invalide: "Ce numéro n'est pas un numéro de mobile camerounais valide.",
+  code_trop_tot: "Un code vient d'être envoyé à ce numéro : patientez avant d'en demander un autre.",
+  sms_indisponible: "Le SMS ne peut pas partir pour le moment. Réessayez dans quelques minutes.",
+  code_expire: "Ce code n'est plus valable : demandez-en un nouveau.",
+  nom_requis: "Première connexion : indiquez votre nom pour créer votre compte.",
+  session_invalide: "Votre session a pris fin : reconnectez-vous avec un nouveau code.",
+  adresses_max: "Cinq adresses au plus : supprimez-en une avant d'en ajouter une autre.",
 };
 const texteErreur = (e) => e instanceof TypeError ? "Pas de connexion. Réessayez quand internet revient." : MESSAGES[e.code] || "Une erreur est survenue. Réessayez.";
 

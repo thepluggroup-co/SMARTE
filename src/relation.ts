@@ -17,7 +17,7 @@ const HEURES_PAR_PRIORITE: Record<string, number> = { haute: 4, normale: 24, bas
 /** Tout sauf lignes_ecriture : une écriture validée ne change pas. Un test vérifie que cette liste reste complète. */
 export const LIENS_TIERS: [string, string][] = [
   ["inscriptions", "tiers_id"], ["opportunites", "tiers_id"], ["activites", "tiers_id"], ["tickets", "tiers_id"], ["taches", "tiers_id"], ["mentorats", "mentor_id"], ["mentorats", "mentore_id"], ["dons", "donateur_id"], ["aides_beneficiaires", "beneficiaire_id"],
-  ["documents_vente", "tiers_id"], ["commandes_achat", "fournisseur_id"], ["commandes_achat", "transitaire_id"], ["ventes_comptoir", "tiers_id"], ["commandes_web", "tiers_id"], ["campagnes_arrivage", "fournisseur_id"], ["inscriptions_precommande", "tiers_id"], ["acomptes_fournisseur", "fournisseur_id"], ["articles_depot", "fournisseur_id"], ["releves_depot", "fournisseur_id"], ["acces_cours", "tiers_id"], ["points_fidelite", "tiers_id"], ["coachs", "tiers_id"], ["accompagnements", "tiers_id"], ["parcours_certification", "tiers_id"], ["candidatures_univ", "tiers_id"], ["inscriptions_univ", "tiers_id"], ["diplomes", "tiers_id"],
+  ["documents_vente", "tiers_id"], ["commandes_achat", "fournisseur_id"], ["commandes_achat", "transitaire_id"], ["ventes_comptoir", "tiers_id"], ["commandes_web", "tiers_id"], ["campagnes_arrivage", "fournisseur_id"], ["inscriptions_precommande", "tiers_id"], ["acomptes_fournisseur", "fournisseur_id"], ["articles_depot", "fournisseur_id"], ["releves_depot", "fournisseur_id"], ["sessions_clients", "tiers_id"], ["adresses_clients", "tiers_id"], ["acces_cours", "tiers_id"], ["points_fidelite", "tiers_id"], ["coachs", "tiers_id"], ["accompagnements", "tiers_id"], ["parcours_certification", "tiers_id"], ["candidatures_univ", "tiers_id"], ["inscriptions_univ", "tiers_id"], ["diplomes", "tiers_id"],
   ["factures_fournisseur", "fournisseur_id"], ["affilies", "tiers_id"], ["dossiers_sav", "fournisseur_id"], ["dossiers_sav", "tiers_id"], ["demandes_retour", "tiers_id"], ["comptes_pro", "tiers_id"], ["vendeurs", "tiers_id"], ["franchises", "tiers_id"], ["baux", "tiers_id"], ["commandes_portail", "tiers_id"], ["relances", "tiers_id"], ["blocages_tiers", "tiers_id"], ["factures_recurrentes", "tiers_id"], ["captures", "tiers_id"], ["documents_ged", "tiers_id"], ["attente_session", "tiers_id"], ["demandes_b2b", "tiers_id"], ["prix_clients", "tiers_id"], ["membres_parcours", "tiers_id"], ["numeros_serie", "tiers_id"], ["offres_fournisseur", "fournisseur_id"], ["retours_fournisseur", "fournisseur_id"], ["contrats", "tiers_id"],
 ];
 
@@ -127,6 +127,9 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
         [garde.id, doublon.email, doublon.telephone, doublon.roles, doublon.branche_id, doublon.ville, doublon.source, doublon.ne_pas_contacter],
       );
       await ctx.client.query("update tiers set fusionne_vers = $2, archive = true, email = null, telephone = null where id = $1", [doublon.id, garde.id]);
+      // Les appareils du doublon perdent l'accès ; ses adresses rejoignent la fiche gardée sans lui voler son « par défaut ».
+      await ctx.client.query("update sessions_clients set revoque_le = now(), revoque_par = $2 where tiers_id = $1 and revoque_le is null", [doublon.id, ctx.utilisateurId]);
+      await ctx.client.query("update adresses_clients set par_defaut = false where tiers_id = $1 and par_defaut", [doublon.id]);
       let table = "";
       try {
         for (const [t, col] of LIENS_TIERS) {
