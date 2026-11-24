@@ -29,6 +29,8 @@ const app = await creerServeur(pool, {
   debitCanal: {
     commandes: process.env.ERP_CANAL_COMMANDES_PAR_MINUTE ? Number(process.env.ERP_CANAL_COMMANDES_PAR_MINUTE) : undefined,
     paiements: process.env.ERP_CANAL_PAIEMENTS_PAR_MINUTE ? Number(process.env.ERP_CANAL_PAIEMENTS_PAR_MINUTE) : undefined,
+    codes: process.env.ERP_CANAL_CODES_PAR_MINUTE ? Number(process.env.ERP_CANAL_CODES_PAR_MINUTE) : undefined,
+    connexions: process.env.ERP_CANAL_CONNEXIONS_PAR_MINUTE ? Number(process.env.ERP_CANAL_CONNEXIONS_PAR_MINUTE) : undefined,
   },
 });
 

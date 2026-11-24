@@ -54,6 +54,7 @@ import { enregistrerAcomptes } from "./acomptes.js";
 import { enregistrerDepotVente } from "./depotvente.js";
 import { enregistrerCouverture } from "./couverture.js";
 import { enregistrerMessages, type PrestataireMessages } from "./messages.js";
+import { enregistrerComptesClients } from "./comptesclients.js";
 import { enregistrerPilotage } from "./pilotage.js";
 import { enregistrerRh } from "./rh.js";
 import { enregistrerTresorerie } from "./tresorerie.js";
@@ -113,7 +114,8 @@ export interface OptionsServeur {
   /** Prestataire SMS et WhatsApp ; sans lui, les messages aux clients attendent dans la file. */
   prestataireMessages?: PrestataireMessages;
   /** Commandes et lancements de paiement par minute et par adresse IP sur la Marketplace (20 et 10 par défaut). */
-  debitCanal?: { commandes?: number; paiements?: number };
+  /** Demandes de code et tentatives de connexion des comptes clients par minute (30 et 60 par défaut). */
+  debitCanal?: { commandes?: number; paiements?: number; codes?: number; connexions?: number };
 }
 
 export interface Outils {
@@ -751,7 +753,13 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
       await exiger(ctx, "tiers.voir");
       const t = await exigerTiersVisible(ctx, req.params.id, "tiers.voir");
       const { id, type, nom, email, telephone, langue, roles, entite_origine_id, archive, cree_le, branche_id, ne_pas_contacter } = t;
-      return { id, type, nom, email, telephone, langue, roles, entite_origine_id, archive, cree_le, branche_id, ne_pas_contacter };
+      // Le compte en ligne du client : appareils encore connectés et dernière connexion.
+      const { rows: [compte] } = await ctx.client.query(
+        `select count(*) filter (where revoque_le is null and expire_le > now())::int as appareils, max(cree_le) as derniere_connexion
+         from sessions_clients where tiers_id = $1`,
+        [id],
+      );
+      return { id, type, nom, email, telephone, langue, roles, entite_origine_id, archive, cree_le, branche_id, ne_pas_contacter, compte_en_ligne: compte };
     }),
   );
 
@@ -826,6 +834,10 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
   enregistrerDepotVente(app, { protege, exigerSurEntite, exiger });
   enregistrerCouverture(app, pool, { protege, exigerSurEntite, exiger }, taches);
   enregistrerMessages(app, pool, { protege, exigerSurEntite, exiger }, options.urlPublique, options.prestataireMessages);
+  enregistrerComptesClients(app, pool, { protege, exigerSurEntite, exiger }, {
+    prestataire: options.prestataireMessages, cleSecrets: options.cleSecrets, urlPublique: options.urlPublique,
+    codesParMinute: options.debitCanal?.codes ?? 30, connexionsParMinute: options.debitCanal?.connexions ?? 60, commandesParMinute: options.debitCanal?.commandes ?? 20,
+  });
   enregistrerRecouvrement(app, { protege, exigerSurEntite, exiger });
   enregistrerProspection(app, pool, { protege, exigerSurEntite, exiger });
   enregistrerSocle(app, { protege, exigerSurEntite, exiger });
