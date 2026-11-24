@@ -31,6 +31,7 @@ const app = await creerServeur(pool, {
     paiements: process.env.ERP_CANAL_PAIEMENTS_PAR_MINUTE ? Number(process.env.ERP_CANAL_PAIEMENTS_PAR_MINUTE) : undefined,
     codes: process.env.ERP_CANAL_CODES_PAR_MINUTE ? Number(process.env.ERP_CANAL_CODES_PAR_MINUTE) : undefined,
     connexions: process.env.ERP_CANAL_CONNEXIONS_PAR_MINUTE ? Number(process.env.ERP_CANAL_CONNEXIONS_PAR_MINUTE) : undefined,
+    care: process.env.ERP_CANAL_CARE_PAR_MINUTE ? Number(process.env.ERP_CANAL_CARE_PAR_MINUTE) : undefined,
   },
 });
 

@@ -4,8 +4,14 @@ import { ErreurApi, type Outils } from "./serveur.js";
 export interface Lecon { titre: string; contenu: string; questions: { enonce: string; choix: string[]; bonne: number }[] }
 export interface Plan { description: string; lecons: Lecon[] }
 
-/** Interchangeable : le reste du module ne dépend d'aucun fournisseur. */
-export type GenerateurIa = (consigne: string, schema: object) => Promise<unknown>;
+/**
+ * Interchangeable : le reste du module ne dépend d'aucun fournisseur.
+ * Réglages facultatifs : consigne de rôle, délai d'attente (au-delà, « ia_indisponible ») et longueur maximale de la réponse.
+ */
+export interface ReglagesIa { systeme?: string; delaiMs?: number; maxJetons?: number }
+export type GenerateurIa = (consigne: string, schema: object, reglages?: ReglagesIa) => Promise<unknown>;
+
+const CONSIGNE_FORMATEUR = "Tu aides des formateurs à préparer un cours en français. Reste factuel et pratique, sans inventer de chiffres, de lois ni de sources. Le formateur relit tout avant publication.";
 
 const SCHEMA = {
   type: "object", additionalProperties: false, required: ["description", "lecons"],
@@ -58,26 +64,28 @@ export function validerPlan(brut: unknown, maxLecons: number): Plan {
 
 /** Appel de l'API Claude. La clé et le modèle viennent de la configuration du serveur. */
 export function generateurClaude(cle: string, modele: string, envoyer: typeof fetch = fetch): GenerateurIa {
-  return async (consigne, schema) => {
-    let r: Response;
+  return async (consigne, schema, reglages = {}) => {
+    // Le délai couvre aussi la lecture de la réponse.
+    const signal = AbortSignal.timeout(reglages.delaiMs ?? 300_000);
+    let d: { stop_reason?: string; content?: { type: string; text?: string }[] };
     try {
-      r = await envoyer("https://api.anthropic.com/v1/messages", {
+      const r = await envoyer("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        signal: AbortSignal.timeout(300_000),
+        signal,
         headers: { "content-type": "application/json", "x-api-key": cle, "anthropic-version": "2026-10-21" },
         body: JSON.stringify({
           model: modele,
-          max_tokens: 16000,
-          system: "Tu aides des formateurs à préparer un cours en français. Reste factuel et pratique, sans inventer de chiffres, de lois ni de sources. Le formateur relit tout avant publication.",
+          max_tokens: reglages.maxJetons ?? 16000,
+          system: reglages.systeme ?? CONSIGNE_FORMATEUR,
           messages: [{ role: "user", content: consigne }],
           output_config: { format: { type: "json_schema", schema } },
         }),
       });
+      if (!r.ok) throw new ErreurApi(502, "ia_indisponible");
+      d = await r.json() as typeof d;
     } catch {
       throw new ErreurApi(502, "ia_indisponible");
     }
-    if (!r.ok) throw new ErreurApi(502, "ia_indisponible");
-    const d = await r.json() as { stop_reason?: string; content?: { type: string; text?: string }[] };
     if (d.stop_reason !== "end_turn") throw new ErreurApi(502, "ia_reponse_invalide");
     const texte = d.content?.find((b) => b.type === "text")?.text;
     try {

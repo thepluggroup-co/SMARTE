@@ -28,7 +28,7 @@ const AVEC_ZONE = ["domicile", "agence_voyage"];
 const MOYENS = ["orange_money", "mtn_momo", "a_la_livraison"];
 const STATUTS = ["reservee", "payee", "facturee", "expediee", "livree", "annulee", "expiree"];
 const COLIS_ANNULABLE = ["prepare", "echec", "retour"];
-const ARTICLE_EN_LIGNE = "p.actif and p.type = 'produit' and p.suivi_stock";
+export const ARTICLE_EN_LIGNE = "p.actif and p.type = 'produit' and p.suivi_stock";
 const uuid = { type: "string", format: "uuid" } as const;
 const paramId = { type: "object", required: ["id"], properties: { id: uuid } } as const;
 const parMinute = (max: number) => ({ rateLimit: { max, timeWindow: "1 minute" } });
@@ -97,6 +97,17 @@ export async function ficheClient(c: Client, b: Boutique, lieuId: string, nom: s
   );
   await publierEvenement(c, "tiers.cree", { id: n.id });
   return n.id;
+}
+
+export interface ArticlePrix { id: string; prix_vente: number; taux_taxe: number; tranches: boolean; promotion: { type: string; valeur: number | string } | null }
+
+/** Prix TTC d'une unité tel que la Marketplace l'affiche : celui de la caisse, promotion comprise, sans prix négocié. */
+export async function prixEnLigne(c: Client, a: ArticlePrix): Promise<number> {
+  // Hors tranches, aucun palier ne joue pour une unité (quantite_min > 1, migration 0020) : seule la promotion compte.
+  const prix = a.tranches ? await prixProduit(c, a.id, a.prix_vente, 1)
+    : a.promotion ? prixPromo(a.prix_vente, a.promotion.type, Number(a.promotion.valeur)) : a.prix_vente;
+  const m = calculerLigne(1, prix, 0, a.taux_taxe);
+  return m.ht + m.taxes;
 }
 
 /** Une commande en ligne telle que son client la voit : jamais de coût, de jeton ni de donnée d'un autre client. */
@@ -254,7 +265,10 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
              where o.produit_id = p.id and o.actif and (now() at time zone 'Africa/Douala')::date between o.debut and o.fin
              order by o.cree_le desc limit 1) as promotion,
            (select json_build_object('moyenne', round(avg(r.note), 1)::float, 'nombre', count(*)::int)
-              from retours_clients r where r.produit_id = p.id and r.statut = 'publie') as avis
+              from retours_clients r where r.produit_id = p.id and r.statut = 'publie') as avis,
+           -- Texte de vente publié par le marketing (lot 4C) ; le nom reste celui de l'ERP.
+           (select json_build_object('titre', v.titre, 'description', v.description, 'points_cles', v.points_cles)
+              from textes_vente v where v.produit_id = p.id and v.statut = 'publie') as vente
          from produits p
          left join categories_articles g on g.id = p.categorie_id and g.actif
          left join categories_articles gp on gp.id = g.parent_id
@@ -265,11 +279,7 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
       );
       const catalogue = [];
       for (const { prix_vente, taux_taxe, tranches, ...p } of rows) {
-        // Hors tranches, aucun palier ne joue pour une unité (quantite_min > 1, migration 0020) : seule la promotion compte.
-        const prix = tranches ? await prixProduit(c, p.id, prix_vente, 1)
-          : p.promotion ? prixPromo(prix_vente, p.promotion.type, Number(p.promotion.valeur)) : prix_vente;
-        const m = calculerLigne(1, prix, 0, taux_taxe);
-        catalogue.push({ ...p, prix_ttc: m.ht + m.taxes });
+        catalogue.push({ ...p, prix_ttc: await prixEnLigne(c, { id: p.id, prix_vente, taux_taxe, tranches, promotion: p.promotion }) });
       }
       return {
         branche: b.nom,

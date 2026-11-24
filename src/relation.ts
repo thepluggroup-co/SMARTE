@@ -12,12 +12,12 @@ const paramId = { type: "object", required: ["id"], properties: { id: uuid } } a
 const texte = (max: number) => ({ type: "string", minLength: 1, maxLength: max }) as const;
 const ETAPES = ["nouveau", "contacte", "qualifie", "proposition", "gagne", "perdu"];
 /** Délais de réponse proposés, à rendre paramétrables après l'essai. */
-const HEURES_PAR_PRIORITE: Record<string, number> = { haute: 4, normale: 24, basse: 72 };
+export const HEURES_PAR_PRIORITE: Record<string, number> = { haute: 4, normale: 24, basse: 72 };
 
 /** Tout sauf lignes_ecriture : une écriture validée ne change pas. Un test vérifie que cette liste reste complète. */
 export const LIENS_TIERS: [string, string][] = [
   ["inscriptions", "tiers_id"], ["opportunites", "tiers_id"], ["activites", "tiers_id"], ["tickets", "tiers_id"], ["taches", "tiers_id"], ["mentorats", "mentor_id"], ["mentorats", "mentore_id"], ["dons", "donateur_id"], ["aides_beneficiaires", "beneficiaire_id"],
-  ["documents_vente", "tiers_id"], ["commandes_achat", "fournisseur_id"], ["commandes_achat", "transitaire_id"], ["ventes_comptoir", "tiers_id"], ["commandes_web", "tiers_id"], ["campagnes_arrivage", "fournisseur_id"], ["inscriptions_precommande", "tiers_id"], ["acomptes_fournisseur", "fournisseur_id"], ["articles_depot", "fournisseur_id"], ["releves_depot", "fournisseur_id"], ["sessions_clients", "tiers_id"], ["adresses_clients", "tiers_id"], ["acces_cours", "tiers_id"], ["points_fidelite", "tiers_id"], ["coachs", "tiers_id"], ["accompagnements", "tiers_id"], ["parcours_certification", "tiers_id"], ["candidatures_univ", "tiers_id"], ["inscriptions_univ", "tiers_id"], ["diplomes", "tiers_id"],
+  ["documents_vente", "tiers_id"], ["commandes_achat", "fournisseur_id"], ["commandes_achat", "transitaire_id"], ["ventes_comptoir", "tiers_id"], ["commandes_web", "tiers_id"], ["campagnes_arrivage", "fournisseur_id"], ["inscriptions_precommande", "tiers_id"], ["acomptes_fournisseur", "fournisseur_id"], ["articles_depot", "fournisseur_id"], ["releves_depot", "fournisseur_id"], ["sessions_clients", "tiers_id"], ["adresses_clients", "tiers_id"], ["conversations_care", "tiers_id"], ["acces_cours", "tiers_id"], ["points_fidelite", "tiers_id"], ["coachs", "tiers_id"], ["accompagnements", "tiers_id"], ["parcours_certification", "tiers_id"], ["candidatures_univ", "tiers_id"], ["inscriptions_univ", "tiers_id"], ["diplomes", "tiers_id"],
   ["factures_fournisseur", "fournisseur_id"], ["affilies", "tiers_id"], ["dossiers_sav", "fournisseur_id"], ["dossiers_sav", "tiers_id"], ["demandes_retour", "tiers_id"], ["comptes_pro", "tiers_id"], ["vendeurs", "tiers_id"], ["franchises", "tiers_id"], ["baux", "tiers_id"], ["commandes_portail", "tiers_id"], ["relances", "tiers_id"], ["blocages_tiers", "tiers_id"], ["factures_recurrentes", "tiers_id"], ["captures", "tiers_id"], ["documents_ged", "tiers_id"], ["attente_session", "tiers_id"], ["demandes_b2b", "tiers_id"], ["prix_clients", "tiers_id"], ["membres_parcours", "tiers_id"], ["numeros_serie", "tiers_id"], ["offres_fournisseur", "fournisseur_id"], ["retours_fournisseur", "fournisseur_id"], ["contrats", "tiers_id"],
 ];
 
@@ -458,7 +458,12 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
          where m.ticket_id = $1 order by m.cree_le`,
         [req.params.id],
       );
-      return { ...ticket, messages: rows };
+      // Un ticket ouvert par l'assistant GLOMARI Care porte sa conversation, lue ici sans copie.
+      const { rows: [v] } = await ctx.client.query("select id from conversations_care where ticket_id = $1", [req.params.id]);
+      const conversation = v ? (await ctx.client.query(
+        "select role, contenu, sans_reponse, propose_conseiller, motif, aide, cree_le from messages_care where conversation_id = $1 order by cree_le, id", [v.id],
+      )).rows : null;
+      return { ...ticket, messages: rows, ...(conversation ? { conversation } : {}) };
     }),
   );
 

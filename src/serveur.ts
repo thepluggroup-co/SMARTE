@@ -55,6 +55,8 @@ import { enregistrerDepotVente } from "./depotvente.js";
 import { enregistrerCouverture } from "./couverture.js";
 import { enregistrerMessages, type PrestataireMessages } from "./messages.js";
 import { enregistrerComptesClients } from "./comptesclients.js";
+import { enregistrerCare } from "./care.js";
+import { enregistrerFichesVente } from "./fichesvente.js";
 import { enregistrerPilotage } from "./pilotage.js";
 import { enregistrerRh } from "./rh.js";
 import { enregistrerTresorerie } from "./tresorerie.js";
@@ -115,7 +117,8 @@ export interface OptionsServeur {
   prestataireMessages?: PrestataireMessages;
   /** Commandes et lancements de paiement par minute et par adresse IP sur la Marketplace (20 et 10 par défaut). */
   /** Demandes de code et tentatives de connexion des comptes clients par minute (30 et 60 par défaut). */
-  debitCanal?: { commandes?: number; paiements?: number; codes?: number; connexions?: number };
+  /** Messages à l'assistant GLOMARI Care par minute (30 par défaut) : chacun coûte un appel à l'IA. */
+  debitCanal?: { commandes?: number; paiements?: number; codes?: number; connexions?: number; care?: number };
 }
 
 export interface Outils {
@@ -838,6 +841,10 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
     prestataire: options.prestataireMessages, cleSecrets: options.cleSecrets, urlPublique: options.urlPublique,
     codesParMinute: options.debitCanal?.codes ?? 30, connexionsParMinute: options.debitCanal?.connexions ?? 60, commandesParMinute: options.debitCanal?.commandes ?? 20,
   });
+  enregistrerCare(app, pool, { protege, exigerSurEntite, exiger }, taches, {
+    generateur: options.generateurIa, urlPublique: options.urlPublique, careParMinute: options.debitCanal?.care ?? 30,
+  });
+  enregistrerFichesVente(app, { protege, exigerSurEntite, exiger }, options.generateurIa);
   enregistrerRecouvrement(app, { protege, exigerSurEntite, exiger });
   enregistrerProspection(app, pool, { protege, exigerSurEntite, exiger });
   enregistrerSocle(app, { protege, exigerSurEntite, exiger });

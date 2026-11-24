@@ -377,6 +377,10 @@ const MESSAGES = {
   nom_requis: "Première connexion : indiquez votre nom pour créer votre compte.",
   session_invalide: "Votre session a pris fin : reconnectez-vous avec un nouveau code.",
   adresses_max: "Cinq adresses au plus : supprimez-en une avant d'en ajouter une autre.",
+  message_vide: "Écrivez votre question avant de l'envoyer.",
+  conversation_pleine: "Cette conversation est terminée : demandez un conseiller ou ouvrez une nouvelle conversation.",
+  brouillon_absent: "Aucun brouillon à publier : proposez ou écrivez d'abord le texte.",
+  aucun_texte_publie: "Aucun texte n'est publié pour cet article.",
 };
 const texteErreur = (e) => e instanceof TypeError ? "Pas de connexion. Réessayez quand internet revient." : MESSAGES[e.code] || "Une erreur est survenue. Réessayez.";
 

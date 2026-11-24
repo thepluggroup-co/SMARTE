@@ -335,6 +335,10 @@ export function enregistrerAutomatisation(app: FastifyInstance, pool: pg.Pool, o
       if (t.anonymise_le) throw new ErreurApi(409, "deja_anonymise");
       await ctx.client.query("update tiers set nom = 'Personne anonymisée', email = null, telephone = null, archive = true, anonymise_le = now() where id = $1", [t.id]);
       await ctx.client.query("update activites set contenu = 'Contenu effacé' where tiers_id = $1", [t.id]);
+      // Le fil de l'assistant GLOMARI Care peut contenir ce que la personne a écrit ; les avis et les statuts restent, pour l'indicateur.
+      await ctx.client.query(
+        "update messages_care set contenu = 'Message effacé' where conversation_id in (select id from conversations_care where tiers_id = $1)", [t.id],
+      );
       await ctx.client.query("select journal_evenement('rgpd.anonymisation', $1)", [JSON.stringify({ tiers: t.id, motif: req.body.motif })]);
       return { anonymise: true };
     }),

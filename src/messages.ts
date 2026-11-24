@@ -77,7 +77,7 @@ export const masquerNumero = (tel: string) => `*******${tel.slice(-2)}`;
 // ---------- Réglages et mise en file ----------
 
 /** La branche de l'entité, si elle gère du stock (GLOMARI) ; jamais GTA. */
-async function brancheCommerce(c: Client, entiteId: string): Promise<string | null> {
+export async function brancheCommerce(c: Client, entiteId: string): Promise<string | null> {
   const { rows: [b] } = await c.query(
     `select entite_branche($1) as id where exists (select 1 from modules_entite m where m.entite_id = entite_branche($1) and m.module = 'achats_stocks' and m.actif)`,
     [entiteId],

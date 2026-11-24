@@ -27,13 +27,13 @@ const parMinute = (max: number) => ({ rateLimit: { max, timeWindow: "1 minute" }
 export interface OptionsComptes {
   prestataire?: PrestataireMessages; cleSecrets: Buffer; urlPublique: string; codesParMinute: number; connexionsParMinute: number; commandesParMinute: number;
 }
-interface Session { id: string; tiers_id: string; nom: string; telephone: string; email: string | null; expire_le: Date }
+export interface Session { id: string; tiers_id: string; nom: string; telephone: string; email: string | null; expire_le: Date }
 
 /** L'empreinte lie le code à l'organisation et au numéro : un code ne vaut nulle part ailleurs. */
 const empreinteCode = (cle: Buffer, org: string, telephone: string, code: string) => createHmac("sha256", cle).update(`${org}:${telephone}:${code}`).digest("hex");
 
 /** La session de la requête : en-tête `Authorization: Client <jeton>`, valable, sur une fiche intacte de la branche. */
-async function clientConnecte(c: Client, b: Boutique, req: FastifyRequest): Promise<Session> {
+export async function clientConnecte(c: Client, b: Boutique, req: FastifyRequest): Promise<Session> {
   const m = ENTETE.exec(req.headers.authorization ?? "");
   if (!m) throw new ErreurApi(401, "session_invalide");
   const { rows: [s] } = await c.query(
