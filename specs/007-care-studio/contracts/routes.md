@@ -4,6 +4,8 @@ Tout code d'erreur a son message dans `MESSAGES` (`public/app.js`). Codes nouvea
 
 Les routes `/marketplace/:org/care/…` passent par `parBoutique` : boutique fermée ou organisation inconnue donnent `404 introuvable`. Une conversation inconnue, ou un jeton qui ne lui correspond pas, donne aussi `404 introuvable`.
 
+Pour poser une question ou demander un conseiller, une session ouverte sur un autre compte que celui déjà associé à la conversation donne aussi `404 introuvable`. Le client peut ouvrir une nouvelle conversation après un changement de compte.
+
 ## Assistant, côté Marketplace (`src/care.ts`)
 
 ### POST /marketplace/:org/care/messages

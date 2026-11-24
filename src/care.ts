@@ -307,6 +307,7 @@ export function enregistrerCare(app: FastifyInstance, pool: pg.Pool, outils: Out
       let v: Record<string, any>;
       if (req.body.conversation) {
         v = await conversationDe(c, b, req.body.conversation, req.body.jeton ?? "", true);
+        if (session && v.tiers_id && v.tiers_id !== session.tiers_id) throw new ErreurApi(404, "introuvable");
       } else {
         jetonNouveau = randomBytes(32).toString("base64url");
         v = (await c.query(
@@ -426,6 +427,7 @@ export function enregistrerCare(app: FastifyInstance, pool: pg.Pool, outils: Out
     const r = await parBoutique(pool, req.params.org, async (c, b) => {
       const session = await sessionFacultative(c, b, req);
       const v = await conversationDe(c, b, req.body.conversation, req.body.jeton, true);
+      if (session && v.tiers_id && v.tiers_id !== session.tiers_id) throw new ErreurApi(404, "introuvable");
       if (v.ticket_id) {
         const { rows: [k] } = await c.query("select numero, priorite from tickets where id = $1", [v.ticket_id]);
         return { deja: true, ticket: k.numero as string, priorite: k.priorite as string };

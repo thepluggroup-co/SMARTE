@@ -126,7 +126,7 @@ description: "Liste des tâches de l'assistant GLOMARI Care et du studio des fic
 - [X] T017 [US3] Dans `src/relation.ts` :
   - `GET /tickets/:id` ajoute `conversation` (fil de `messages_care`) quand `conversations_care.ticket_id` porte ce ticket ;
   - ajouter `conversations_care.tiers_id` à `LIENS_TIERS` (research.md R9).
-- [ ] T018 [P] [US3] Dans `public/relation.js`, le détail d'un ticket affiche la conversation de l'assistant (rôle, texte, heure, mention « sans réponse »).
+- [x] T018 [P] [US3] Dans `public/relation.js`, le détail d'un ticket affiche la conversation de l'assistant (rôle, texte, heure, mention « sans réponse »).
 
 **Point d'étape** : T015 vert ; aucun client n'est laissé sans suite, et l'équipe lit tout l'échange dans le ticket.
 
@@ -149,7 +149,7 @@ description: "Liste des tâches de l'assistant GLOMARI Care et du studio des fic
   - `GET /care/indicateur` (`care.voir`, 30 derniers jours par défaut, 366 au plus) : conversations créées dans la période (`conversations_care.cree_le`), closes, transmises, ouvertes, parts, avis (`messages_care.aide`), 50 dernières questions suivies d'une réponse `messages_care.sans_reponse`.
 - [X] T022 [US4] Dans `src/care.ts`, ajouter à `taches` la tâche horaire : `fermerConversations`, puis effacement des conversations non transmises dont `conversations_care.derniere_activite` a plus de 12 mois (les messages suivent par `messages_care.conversation_id`).
 - [X] T023 [P] [US4] Dans `src/automatisation.ts`, `POST /tiers/:id/anonymisation` remplace aussi `messages_care.contenu` par « Message effacé » pour les conversations dont `conversations_care.tiers_id` est la fiche, dans la même transaction ; les autres champs restent (research.md R7, FR-022).
-- [ ] T024 [P] [US4] Créer `public/assistantcare.js` avec `ecranAssistantCare` (onglets « Réponses validées », « Conversations », « Indicateur ») ; dans `public/app.js`, bouton « Assistant Care » à côté de « GLOMARI Care » (`care.voir` ou `support.voir`, espace commerce) ; ajouter le script à `public/index.html` et au cache de `public/sw.js` (v8). Vérifier qu'aucun nom d'écran n'est déclaré deux fois.
+- [x] T024 [P] [US4] Créer `public/assistantcare.js` avec `ecranAssistantCare` (onglets « Réponses validées », « Conversations », « Indicateur ») ; dans `public/app.js`, bouton « Assistant Care » à côté de « GLOMARI Care » (`care.voir` ou `support.voir`, espace commerce) ; ajouter le script à `public/index.html` et au cache de `public/sw.js` (v8). Vérifier qu'aucun nom d'écran n'est déclaré deux fois.
 
 **Point d'étape** : T019 vert ; l'équipe améliore les réponses et mesure l'objectif des 80 %.
 
@@ -174,7 +174,7 @@ description: "Liste des tâches de l'assistant GLOMARI Care et du studio des fic
   - article suivi en stock d'une branche avec le module de stock, sinon `409 module_inactif` ; contenu d'une version publiée jamais modifié.
 - [X] T027 [US5] Dans `src/fichesvente.ts`, `POST /fiches-vente/:produitId/brouillon-ia` (`marketing.gerer`), en trois temps comme `POST /studio/brouillons` : droits et article lus dans une 1re transaction ; appel à l'IA hors de la base, 60 secondes au plus, consigne de rôle « ne rien inventer », informations de l'article avec `prixEnLigne` et `textes_vente.notes` ; enregistrement en brouillon (`textes_vente.source` = `ia`) dans une 2e transaction. Schéma de sortie limité selon data-model.md (`textes_vente.titre`, `textes_vente.description`, `textes_vente.points_cles`), sinon `502 ia_reponse_invalide` ; sans générateur, `503 ia_non_configuree`.
 - [X] T028 [US5] Dans `src/canalenligne.ts`, `GET /marketplace/:org/catalogue` ajoute à chaque article `vente` (le `textes_vente` publié : titre, description, points clés) ou null ; `nom` inchangé.
-- [ ] T029 [P] [US5] Créer `public/fichesvente.js` avec `ecranFichesVente` (liste filtrable, fiche de l'article, notes, « Proposer un brouillon », correction, « Publier », « Retirer », historique) ; dans `public/app.js`, bouton « Fiches de vente » à côté de « Marketing » (`marketing.voir`) ; ajouter le script à `public/index.html` et au cache de `public/sw.js`. Vérifier qu'aucun nom d'écran n'est déclaré deux fois.
+- [x] T029 [P] [US5] Créer `public/fichesvente.js` avec `ecranFichesVente` (liste filtrable, fiche de l'article, notes, « Proposer un brouillon », correction, « Publier », « Retirer », historique) ; dans `public/app.js`, bouton « Fiches de vente » à côté de « Marketing » (`marketing.voir`) ; ajouter le script à `public/index.html` et au cache de `public/sw.js`. Vérifier qu'aucun nom d'écran n'est déclaré deux fois.
 
 **Point d'étape** : T025 vert ; la Marketplace présente les articles, et l'assistant s'en sert.
 
@@ -182,19 +182,19 @@ description: "Liste des tâches de l'assistant GLOMARI Care et du studio des fic
 
 ## Phase 8 : finitions
 
-- [ ] T030 [P] Mettre à jour `CLAUDE.md` :
+- [x] T030 [P] Mettre à jour `CLAUDE.md` :
   - état : lot 4, partie C livrée ;
   - entrée « Assistant GLOMARI Care et studio des fiches » : contexte fermé, garde-fous, appel à l'IA hors de la base et limité à 9 secondes, relais par ticket, rôle Service client pour lire les tickets, limites, indicateur, anonymisation, textes de vente versionnés ;
   - limites : recherche par mots, recette des 80 % à faire avec l'IA réelle, fenêtre W8 dans `glomari-web`.
-- [ ] T031 [P] Mettre à jour `docs/Couverture du cahier des charges.md` (Commerce, CRM, Support).
-- [ ] T032 [P] Dans `docs/Fiche technique globale GLOMARI.md` : section 9 lot 4, état de la partie C ; section 6.1, routes `/marketplace/:org/care/…` et champ `vente` du catalogue.
-- [ ] T033 [P] Dans `docs/Guide de mise en ligne.md`, section « Assistant GLOMARI Care et fiches de vente (lot 4C) » :
+- [x] T031 [P] Mettre à jour `docs/Couverture du cahier des charges.md` (Commerce, CRM, Support).
+- [x] T032 [P] Dans `docs/Fiche technique globale GLOMARI.md` : section 9 lot 4, état de la partie C ; section 6.1, routes `/marketplace/:org/care/…` et champ `vente` du catalogue.
+- [x] T033 [P] Dans `docs/Guide de mise en ligne.md`, section « Assistant GLOMARI Care et fiches de vente (lot 4C) » :
   - `ERP_IA_CLE` et `ERP_IA_MODELE` dans `.env` du serveur, jamais dans le dépôt ;
   - débit `ERP_CANAL_CARE_PAR_MINUTE`, à relever avant l'ouverture au public si besoin ;
   - donner le rôle Service client aux conseillers qui traitent les relais ;
   - sujets de départ des réponses validées (délais, zones, paiement à la livraison, retours, garanties, précommandes) ;
   - recette des 100 conversations et des 20 détournements avant l'ouverture.
-- [ ] T034 Relire `src/care.ts`, `src/fichesvente.ts` et les ajouts :
+- [X] T034 Relire `src/care.ts`, `src/fichesvente.ts` et les ajouts :
   - rien de confidentiel dans une consigne (ni coût, ni marge, ni fournisseur, ni quantité, ni nom ni téléphone de client) ;
   - aucune connexion à la base retenue pendant un appel à l'IA ;
   - aucun jeton de conversation en clair en base ;

@@ -304,7 +304,11 @@ Paiement à la livraison : reservee ──(confirmation interne)──► colis 
 
 | Méthode et route | Rôle | Statut |
 | --- | --- | --- |
-| `GET /marketplace/:org/catalogue` | Articles actifs de GLOMARI : id, code, nom, catégorie, marque, photos, prix TTC, promotion. Jamais le coût, la marge ni le fournisseur | Lot 1 |
+| `GET /marketplace/:org/catalogue` | Articles actifs de GLOMARI : id, code, nom, catégorie, marque, photos, prix TTC, promotion. Le champ `vente` contient le titre, la description et les points clés publiés, ou `null`. | Lots 1 et 4C |
+| `POST /marketplace/:org/care/messages` | Poser une question, démarrer ou poursuivre une conversation | Lot 4C |
+| `GET /marketplace/:org/care/conversations/:id` | Relire la conversation avec son jeton | Lot 4C |
+| `POST /marketplace/:org/care/avis` | Indiquer si une réponse a aidé | Lot 4C |
+| `POST /marketplace/:org/care/conseiller` | Transmettre la conversation au Service client dans un ticket | Lot 4C |
 | `GET /marketplace/:org/disponibilite?produits=…` | Quantité vendable par lieu (hors avariés et réservations) | Lot 1 |
 | `GET /marketplace/:org/zones` | Zones et frais de livraison, points relais actifs | Lot 1 |
 | `POST /marketplace/:org/commandes` | Crée la commande et réserve le stock ; renvoie référence et lien de suivi | Lot 1 |
@@ -551,7 +555,10 @@ Recette : 80 % des questions courantes réglées sans humain sur 100 conversatio
   - session de 7 jours (choix du 23 novembre 2026), révocable sur un appareil, sur tous, ou par l'équipe Care ;
   - historique des commandes en ligne et des précommandes, sans les achats en caisse (choix du 23 novembre 2026) ; solde payable depuis l'espace ; adresses et fidélité ;
   - l'espace client s'affiche dans `glomari-web` (W6) ; le code d'essai se lit dans l'ERP avec le prestataire factice seulement.
-- **Partie C (assistant GLOMARI Care et studio des fiches produits, points 4 et 5)** : à faire.
+- **Partie C (assistant GLOMARI Care et studio des fiches produits, points 4 et 5)** : routes et écrans ERP développés sur la branche du lot 4C, intégration et recette en attente.
+  - L’assistant s’appuie sur les réponses validées, les données publiques de la boutique et les commandes auxquelles le client a accès. Les conseillers retrouvent la conversation dans le ticket de relais.
+  - Le studio permet de générer, corriger, publier et retirer les textes de vente, avec un historique des versions.
+  - La fenêtre publique de l’assistant relève de W8 dans `glomari-web`. Les contrats et la recette sont dans `specs/007-care-studio/`.
 
 ### Lot 5 · Réseau et indicateurs (phase 2, 2029)
 

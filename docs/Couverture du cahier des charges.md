@@ -41,4 +41,6 @@
 
 **Comptes clients (23 novembre 2026, lot 4 partie B) :** connexion à la Marketplace par téléphone et code reçu par SMS, sans mot de passe, code protégé et limité, session de 7 jours ; le client retrouve ses commandes en ligne et ses précommandes (et paie le solde), ses adresses et ses points de fidélité, et se déconnecte de tous ses appareils. Les écrans de l'espace client restent à construire dans la Marketplace (W6).
 
+**Commerce, CRM et Support (lot 4C).** Sur la branche du lot, le marketing peut rédiger et publier des textes de vente versionnés dans le catalogue. L’équipe Care gère les réponses validées et suit les conversations et les questions sans réponse. Le Service client accède au fil de l’assistant depuis les tickets transmis. La fenêtre publique (W8) et la recette avec l’IA réelle restent à faire.
+
 Le cahier des charges décrit un programme de plusieurs années. Les éléments de la dernière colonne demandent soit un compte ou un accès extérieur, soit un travail important que l'essai réel doit d'abord justifier.

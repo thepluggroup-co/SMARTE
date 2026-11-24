@@ -34,6 +34,9 @@ describe("l'assistant et les commandes du client", () => {
 
     // L'autre client ne reçoit que sa commande.
     const sien = await b.connecter("677 12 34 56");
+    const fil = { conversation: r.corps.conversation, jeton: r.corps.jeton };
+    expect((await b.demander("Où en est ma commande ?", { ...fil, client: sien })).statut).toBe(404);
+    expect((await b.conseiller(fil.conversation, fil.jeton, { client: sien })).statut).toBe(404);
     await b.demander("Où en est ma commande ?", { client: sien });
     expect(b.derniereConsigne()).toContain(`Commande ${autre} `);
     expect(b.derniereConsigne()).not.toContain(avecColis);
