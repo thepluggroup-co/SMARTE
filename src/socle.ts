@@ -11,29 +11,42 @@ export function enregistrerSocle(app: FastifyInstance, outils: Outils): void {
   const ids = async (ctx: Contexte, p: Parameters<typeof entitesAccessibles>[2]) => (await entitesAccessibles(ctx.client, ctx.utilisateurId, p)).map((e) => e.id);
 
   /** Chaque source garde ses propres droits : la recherche ne montre rien de plus que les écrans. */
-  app.get<{ Querystring: { q: string } }>("/recherche", {
-    schema: { querystring: { type: "object", required: ["q"], properties: { q: { type: "string", minLength: 2, maxLength: 100 } } } },
+  app.get<{ Querystring: { q: string; espace?: "formation" | "commerce" } }>("/recherche", {
+    schema: { querystring: { type: "object", required: ["q"], properties: {
+      q: { type: "string", minLength: 2, maxLength: 100 },
+      espace: { type: "string", enum: ["formation", "commerce"] },
+    } } },
   }, async (req) =>
     protege(req, async (ctx) => {
       const motif = `%${req.query.q.replace(/[\\%_]/g, "\\$&")}%`;
+      const espace = req.query.espace;
+      const portee = espace ? new Set((await ctx.client.query(
+        `select e.id from entites e join entites b on b.id = entite_branche(e.id)
+         where b.domaine = $1`, [espace],
+      )).rows.map((e) => e.id)) : null;
+      const dansPortee = (entites: unknown[]) => portee ? entites.filter((id) => portee.has(id)) : entites;
       const res: { genre: string; id: string; titre: string; detail: string }[] = [];
       const ajouter = (genre: string, rows: { id: string; titre: string; detail: string | null }[]) => { for (const r of rows) res.push({ genre, id: r.id, titre: r.titre, detail: r.detail ?? "" }); };
       if (await aPermission(ctx.client, ctx.utilisateurId, "tiers.voir")) {
         const v = await branchesVisibles(ctx.client, ctx.utilisateurId, "tiers.voir");
         ajouter("client", (await ctx.client.query(
-          "select id, nom as titre, coalesce(telephone, email) as detail from tiers where not archive and ($2::boolean or branche_id = any($3::uuid[])) and (nom ilike $1 or telephone ilike $1 or email ilike $1) order by nom limit 10", [motif, v.tout, v.ids],
+          `select id, nom as titre, coalesce(telephone, email) as detail from tiers
+           where not archive and ($2::boolean or branche_id = any($3::uuid[]))
+             and ($4::uuid[] is null or branche_id = any($4::uuid[]))
+             and (nom ilike $1 or telephone ilike $1 or email ilike $1) order by nom limit 10`,
+          [motif, v.tout, v.ids, portee ? [...portee] : null],
         )).rows);
       }
-      const f = await ids(ctx, "facturation.voir");
+      const f = dansPortee(await ids(ctx, "facturation.voir"));
       if (f.length) {
         ajouter("document", (await ctx.client.query(
           "select d.id, d.numero as titre, coalesce(d.client_nom, t.nom) as detail from documents_vente d join tiers t on t.id = d.tiers_id where d.entite_id = any($2::uuid[]) and d.numero ilike $1 order by d.cree_le desc limit 10", [motif, f],
         )).rows);
         ajouter("produit", (await ctx.client.query("select id, nom as titre, code as detail from produits where entite_id = any($2::uuid[]) and (nom ilike $1 or code ilike $1) order by nom limit 10", [motif, f])).rows);
       }
-      const s = await ids(ctx, "formations.voir");
+      const s = dansPortee(await ids(ctx, "formations.voir"));
       if (s.length) ajouter("session", (await ctx.client.query("select s.id, s.code as titre, p.nom as detail from sessions_formation s join programmes p on p.id = s.programme_id where s.entite_id = any($2::uuid[]) and (s.code ilike $1 or p.nom ilike $1) order by s.debut desc limit 10", [motif, s])).rows);
-      const t = await ids(ctx, "support.voir");
+      const t = dansPortee(await ids(ctx, "support.voir"));
       if (t.length) ajouter("ticket", (await ctx.client.query("select id, sujet as titre, statut as detail from tickets where entite_id = any($2::uuid[]) and sujet ilike $1 order by cree_le desc limit 10", [motif, t])).rows);
       return res;
     }),

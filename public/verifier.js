@@ -1,27 +1,29 @@
 (async () => {
   const zone = document.getElementById("resultat");
   const code = new URLSearchParams(location.search).get("c") || "";
-  const ligne = (texte, classe) => {
-    const p = document.createElement("p");
+  const ligne = (texte, classe, balise = "p") => {
+    const p = document.createElement(balise);
     p.textContent = texte;
     if (classe) p.className = classe;
     return p;
   };
-  zone.textContent = "";
   try {
     const r = await fetch(`/verification/${encodeURIComponent(code)}`);
-    const d = await r.json();
     if (!r.ok) {
-      zone.append(ligne("Certificat introuvable", "etat rouge"));
+      zone.replaceChildren(ligne("Certificat introuvable", "etat rouge", "h1"));
     } else {
-      zone.append(
-        ligne(d.valide ? "Certificat valide" : "Certificat révoqué", d.valide ? "etat vert" : "etat rouge"),
+      const d = await r.json();
+      zone.replaceChildren(
+        ligne(d.valide ? "Certificat valide" : "Certificat révoqué", d.valide ? "etat vert" : "etat rouge", "h1"),
         ligne(d.titulaire, "grand"),
         ligne(d.programme),
         ligne(`N° ${d.numero}, délivré le ${d.delivre_le.split("-").reverse().join("/")}`),
       );
     }
   } catch {
-    zone.append(ligne("Vérification impossible. Réessayez.", "etat rouge"));
+    const reessayer = ligne("Réessayer", "discret", "button");
+    reessayer.type = "button";
+    reessayer.addEventListener("click", () => location.reload());
+    zone.replaceChildren(ligne("Vérification impossible.", "erreur", "h1"), reessayer);
   }
 })();

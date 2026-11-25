@@ -31,7 +31,12 @@
     el("button", { type: "submit" }, "Envoyer mon avis"));
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
+    const bouton = form.querySelector('button[type="submit"]');
+    if (bouton.disabled) return;
     const v = Object.fromEntries(new FormData(form).entries());
+    bouton.disabled = true;
+    form.setAttribute("aria-busy", "true");
+    erreur.replaceChildren();
     const r = await fetch(`/avis-public/${code}`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -41,6 +46,8 @@
       }),
     }).catch(() => null);
     if (r && (r.ok || r.status === 409)) return fin("Merci, votre avis est enregistré.");
+    bouton.disabled = false;
+    form.removeAttribute("aria-busy");
     erreur.replaceChildren(el("div", { class: "erreur", role: "alert" }, "L'envoi a échoué. Réessayez."));
   });
   zone.replaceChildren(

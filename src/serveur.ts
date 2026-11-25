@@ -413,7 +413,29 @@ export async function creerServeur(pool: pg.Pool, options: OptionsServeur): Prom
       for (const { permission } of droits.rows) {
         if (await aPermission(client, utilisateurId, permission)) effectives.push(permission);
       }
-      return { ...u.rows[0], attributions: permissions.rows, permissions: effectives };
+      const portees = await client.query<{ permission: Permission; domaine: "formation" | "commerce"; module: string | null }>(
+        `with recursive attributions_actives as (
+           select distinct rp.permission, a.entite_id from attributions a
+           join role_permissions rp on rp.role_id = a.role_id
+           where a.utilisateur_id = $1 and (a.expire_le is null or a.expire_le > now())
+         ), portee as (
+           select a.permission, e.id from attributions_actives a
+           join entites e on a.entite_id is null or e.id = a.entite_id
+           union
+           select p.permission, e.id from portee p join entites e on e.parent_id = p.id
+         )
+         select distinct p.permission, b.domaine, m.module from portee p
+         join entites b on b.id = entite_branche(p.id) and b.domaine in ('formation', 'commerce')
+         left join modules_entite m on m.entite_id = p.id and m.actif`,
+        [utilisateurId],
+      );
+      const parEspace = { formation: new Set<Permission>(), commerce: new Set<Permission>() };
+      for (const { permission, domaine, module } of portees.rows) {
+        const requis = moduleRequis(permission);
+        if (!requis || requis === module) parEspace[domaine].add(permission);
+      }
+      return { ...u.rows[0], attributions: permissions.rows, permissions: effectives,
+        permissionsParEspace: { formation: [...parEspace.formation], commerce: [...parEspace.commerce] } };
     }),
   );
 

@@ -30,6 +30,9 @@ function majBandeauCaisse(message) {
   const attente = file.filter((v) => !v.erreur);
   const refusees = file.filter((v) => v.erreur);
   zone.replaceChildren(h("div", {},
+    h("p", { class: "etat-reseau-caisse", role: "status" },
+      h("span", { class: navigator.onLine ? "pastille ok" : "pastille attente" }, navigator.onLine ? "Réseau disponible" : "Hors connexion"),
+      h("span", {}, synchroEnCours ? "Synchronisation en cours…" : `${attente.length} vente(s) en attente`)),
     message ? h("div", { class: "succes", role: "status" }, message) : null,
     attente.length ? h("div", { class: "alerte-caisse", role: "status" }, `${attente.length} vente(s) sur cet appareil, en attente d'internet. Ne videz pas les données du navigateur.`) : null,
     refusees.map((v) => h("div", { class: "erreur", role: "alert" },
@@ -48,6 +51,7 @@ function majBandeauCaisse(message) {
 async function synchroniserCaisse() {
   if (synchroEnCours || !jeton || !utilisateurCaisse) return 0;
   synchroEnCours = true;
+  majBandeauCaisse();
   let envoyees = 0;
   try {
     for (const v of fileVentes()) {
@@ -77,7 +81,8 @@ async function synchroniserCaisse() {
   majBandeauCaisse(envoyees ? `${envoyees} vente(s) hors connexion envoyée(s).` : undefined);
   return envoyees;
 }
-window.addEventListener("online", () => synchroniserCaisse());
+window.addEventListener("online", () => { majBandeauCaisse(); synchroniserCaisse(); });
+window.addEventListener("offline", () => majBandeauCaisse());
 setInterval(() => { if (utilisateurCaisse && fileVentes().length) synchroniserCaisse(); }, 60000);
 
 /** La caméra lit les codes quand le navigateur le permet. Sinon, la douchette USB suffit. */
@@ -534,6 +539,7 @@ function voirTicket(t, session) {
   vue(
     h("div", { class: "actions pas-imprimer" }, h("button", { onclick: () => ecranCaisse() }, "Nouvelle vente"), largeur,
       h("button", { class: "discret", onclick: imprimerTicket }, "Imprimer")),
+    t.provisoire ? h("div", { id: "bandeau-caisse", class: "pas-imprimer" }) : null,
     h("div", { class: "document ticket" },
       h("h2", {}, id?.raison_sociale || lieu || "Ticket"),
       id?.raison_sociale && lieu ? h("p", {}, lieu) : null,
@@ -553,6 +559,7 @@ function voirTicket(t, session) {
       t.reste_du > 0 ? h("p", { class: "grand" }, `Reste dû : ${fcfa(t.reste_du)}`) : null,
       t.reste_du > 0 && t.echeance ? h("p", {}, `À payer avant le ${dateFr(t.echeance)}`) : null,
       t.points_gagnes > 0 ? h("p", {}, `Points gagnés : ${t.points_gagnes}`) : null));
+  if (t.provisoire) majBandeauCaisse();
 }
 
 /** Un ticket déjà enregistré : réimpression, retours déjà faits, et nouveau retour partiel pour un responsable. */

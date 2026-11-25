@@ -25,6 +25,18 @@ async function ecranPrecommandes(message) {
   const branches = entites.filter((e) => e.type === "branche" && e.domaine === "commerce");
   const reglages = await Promise.all(branches.map((b) => api("GET", `/canal-config?entiteId=${b.id}`).catch(() => ({ lieux: [] }))));
   const lieux = branches.flatMap((b, i) => reglages[i].lieux.filter((l) => l.actif).map((l) => [`${b.id}|${l.entite_id}`, `${b.nom} › ${l.nom_public}`]));
+  const cartes = h("div");
+  const etat = h("select", {},
+    [["", "Toutes les campagnes"], ...Object.entries(STATUTS_CAMPAGNE)].map(([code, nom]) =>
+      h("option", { value: code, selected: code === filtresEcran("precommandes", "") }, nom)));
+  const afficherCampagnes = () => {
+    garderFiltresEcran("precommandes", etat.value);
+    const selection = campagnes.filter((c) => !etat.value || c.statut === etat.value);
+    cartes.replaceChildren(...(selection.length ? selection.map((k) => carteCampagne(k, gere))
+      : [h("p", { class: "discret-texte", role: "status" }, "Aucune campagne pour ce statut.")]));
+  };
+  etat.addEventListener("change", afficherCampagnes);
+  afficherCampagnes();
   vue(h("h1", {}, "Précommandes"), message ? h("div", { class: "succes", role: "status" }, message) : null,
     h("p", { class: "discret-texte" }, "Une précommande avec acompte, pas un financement participatif : le bon de commande au fabricant se prépare au seuil, et chaque acompte est remboursé si la campagne est annulée ou manque son seuil."),
     h("div", { class: "actions" }, droits.includes("facturation.voir") ? h("button", { class: "discret", onclick: () => ecranCommandesEnLigne() }, "Commandes en ligne") : null),
@@ -61,7 +73,7 @@ async function ecranPrecommandes(message) {
         h("label", {}, "Présentation", h("textarea", { name: "x", maxlength: 2000, rows: 3 })),
       ], "Créer la campagne")
       : h("p", { class: "discret-texte" }, "Ouvrez d'abord la boutique en ligne et déclarez ses lieux (Commandes en ligne › Réglages de la boutique).")) : null,
-    h("div", { class: "carte" }, campagnes.length ? campagnes.map((k) => carteCampagne(k, gere)) : h("p", { class: "discret-texte" }, "Aucune campagne.")));
+    h("div", { class: "carte" }, h("label", { class: "pas-imprimer" }, "Statut de la campagne", etat), cartes));
 }
 
 function carteCampagne(k, gere) {

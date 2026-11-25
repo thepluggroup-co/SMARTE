@@ -248,6 +248,22 @@ describe("règles de session", () => {
     });
     expect(glomari.statut).toBe(403);
   });
+
+  it("retire la session du filtre d’appel après saisie des présences du jour", async () => {
+    const o = await preparer();
+    const date = new Date(Date.now() + 3_600_000).toISOString().slice(0, 10);
+    const creation = await env.api("POST", "/sessions", o.jeton, {
+      programmeId: o.programmeId, code: "APPEL-DU-JOUR", ville: "Douala", debut: date, fin: date,
+    });
+    expect(creation.statut).toBe(201);
+    const sessionId = creation.corps.id as string;
+    const { inscriptionId } = await inscrire({ ...o, sessionId });
+    const liste = async () => (await env.api("GET", "/sessions", o.jeton)).corps
+      .find((session: { id: string }) => session.id === sessionId);
+    expect(await liste()).toMatchObject({ appel_a_saisir: true });
+    expect((await env.api("PUT", `/sessions/${sessionId}/presences`, o.jeton, { date, presents: [inscriptionId] })).statut).toBe(200);
+    expect(await liste()).toMatchObject({ appel_a_saisir: false });
+  });
 });
 
 describe("modifications manuelles par l'administrateur", () => {

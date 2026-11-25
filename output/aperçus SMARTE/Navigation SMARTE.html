@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="fr">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMARTE · Aperçu interactif</title>
+<style>
+  :root{font:16px/1.5 "Segoe UI",system-ui,sans-serif;color:#182034;background:#f5f7fb;--brand:#1455b8;--soft:#eaf2ff;--accent:#137147;--muted:#546176;--line:#dfe5ef}
+  :root[data-space="glomari"]{--brand:#5924b7;--soft:#f2ebff;--accent:#a94a08}
+  *{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button,select{cursor:pointer}button{color:inherit}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--brand);outline-offset:3px}
+  .shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100dvh}.sidebar{background:white;border-right:1px solid var(--line);padding:24px 16px}.brand{display:grid;min-height:84px;align-content:center;padding:0 12px 18px;color:var(--brand);font-weight:800;font-size:25px;letter-spacing:.02em}.brand img{width:156px;height:68px;object-fit:contain;object-position:left}.brand small{font-size:11px;color:var(--muted);letter-spacing:0}.brand strong mark{background:none;color:var(--accent)}
+  nav{display:grid;gap:5px}.navitem{display:flex;align-items:center;gap:12px;border:0;background:transparent;border-radius:10px;text-align:left;padding:11px 12px;width:100%}.navitem[aria-current]{background:var(--soft);color:var(--brand);font-weight:700}.navitem:hover,.quiet:hover{background:var(--soft)}.icon{width:21px;height:21px;flex:none}
+  .main{min-width:0}.bar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;background:#fff;border-bottom:1px solid var(--line);padding:14px clamp(16px,4vw,42px)}.bar label{display:grid;gap:3px;font-size:.76rem;font-weight:700;color:var(--muted)}.search{flex:1;min-width:180px}.bar input,.bar select{width:100%;min-height:42px;padding:8px 11px;background:#fff;border:1px solid var(--line);border-radius:9px;color:#182034}.mobile{display:none}
+  main{max-width:1320px;margin:auto;padding:28px clamp(16px,4vw,42px) 44px}.intro,.heading,.row,.filters{display:flex;align-items:center;justify-content:space-between;gap:12px}.intro{margin-bottom:24px;flex-wrap:wrap}h1,h2,p{margin:0}h1{font-size:clamp(1.65rem,3vw,2.4rem);letter-spacing:-.036em}h2{font-size:1.125rem}.muted{color:var(--muted);font-size:.88rem}.preview{margin-left:auto;align-self:center;font-size:.75rem;color:var(--muted)}
+  .primary,.quiet,.filter{border-radius:9px;min-height:42px;padding:8px 13px;font-weight:650}.primary{color:white;background:var(--brand);border:1px solid transparent}.quiet,.filter{border:1px solid var(--line);background:white}.filter[aria-pressed="true"]{background:var(--soft);color:var(--brand);border-color:var(--brand)}
+  .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:20px}.metric,.card{background:#fff;border:1px solid var(--line);border-radius:14px}.metric{display:flex;align-items:center;text-align:left;gap:13px;padding:17px;transition:transform .18s,box-shadow .18s}.metric:hover{transform:translateY(-3px);box-shadow:0 8px 22px #243c6816}.metric strong{display:block;font-size:1.45rem;line-height:1.2}.badge-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:10px;background:var(--soft);color:var(--brand);flex:none}.metric:nth-child(2) .badge-icon{color:var(--accent)}
+  .columns{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:16px;align-items:start}.card{padding:17px}.heading{margin-bottom:11px;flex-wrap:wrap}.row{border-top:1px solid var(--line);min-height:70px;padding:9px 0}.row strong,.row .muted{display:block}.row button{flex:none}.pill{display:inline-block;border-radius:99px;background:var(--soft);color:var(--brand);font-size:.75rem;padding:3px 8px;margin-top:4px}.filters{justify-content:start;flex-wrap:wrap;margin:0 0 14px}.empty{padding:22px 0;color:var(--muted)}
+  .page{animation:arrive .22s ease-out}@keyframes arrive{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+  dialog{position:fixed;inset:0 0 0 auto;margin:0;width:min(440px,100%);max-width:100%;height:100dvh;max-height:100dvh;border:0;padding:25px;color:inherit;box-shadow:-12px 0 42px #18203422}dialog[open]{animation:panel .22s ease-out}dialog::backdrop{background:#15203e66}@keyframes panel{from{transform:translateX(35px);opacity:.65}to{transform:none;opacity:1}}dl{display:grid;gap:8px;grid-template-columns:auto 1fr;margin:24px 0}dt{font-weight:700}dd{margin:0}.drawer-title{margin:16px 0 5px}
+  @media(max-width:910px){.shell{grid-template-columns:190px minmax(0,1fr)}.columns{grid-template-columns:1fr}.metric{align-items:flex-start;flex-direction:column}}
+  @media(max-width:650px){.shell{display:block}.mobile{display:inline-block}.sidebar{display:none;border:0;border-bottom:1px solid var(--line)}.shell.menu-open .sidebar{display:block}.brand{min-height:0;padding-bottom:10px}.brand img{height:54px}nav{grid-template-columns:1fr 1fr}.bar{align-items:end}.search{flex-basis:100%;order:2}.preview{display:none}.metrics{grid-template-columns:1fr;gap:8px}.metric{flex-direction:row;align-items:center;padding:11px}.row{gap:8px}.row .quiet{padding-inline:8px}}
+  @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+<div class="shell" id="shell">
+  <aside class="sidebar" id="sidebar"><div class="brand" id="brand"></div><nav id="nav" aria-label="Navigation principale"></nav></aside>
+  <div class="main">
+    <header class="bar">
+      <button class="quiet mobile" id="menu" aria-controls="sidebar" aria-expanded="false">Menu</button>
+      <label>Espace de travail<select id="space"><option value="gta">GTA</option><option value="glomari">GLOMARI</option></select></label>
+      <label id="placeLabel">Site<select id="place"></select></label>
+      <label class="search">Recherche<input id="search" type="search" placeholder="Rechercher dans cet espace"></label>
+      <span class="preview">Aperçu · Données fictives</span>
+    </header>
+    <main id="content"></main>
+  </div>
+</div>
+<dialog id="drawer" aria-labelledby="detail-title"><div class="heading"><span class="muted">Fiche de démonstration</span><button class="quiet" id="close" autofocus>Fermer</button></div><div id="detail"></div></dialog>
+<script>
+const byId = id => document.getElementById(id);
+const paths = {
+  home:'M3 10l9-7 9 7v10H3z M9 20v-6h6v6', calendar:'M4 6h16v14H4z M8 3v6 M16 3v6 M4 11h16',
+  people:'M16 20v-3a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v3 M14 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M17 4a3 3 0 0 1 0 6 M18 14a3 3 0 0 1 2 3v3',
+  box:'M3 8l9-5 9 5v9l-9 5-9-5z M3 8l9 5 9-5 M12 13v9', check:'M5 4h14v16H5z M8 12l3 3 5-6',
+  chart:'M4 4v16h16 M8 16v-4 M12 16V8 M16 16v-6', book:'M12 6v14 M3 4c3 0 6 0 9 2 3-2 6-2 9-2v14c-3 0-6 0-9 2-3-2-6-2-9-2z',
+  chat:'M3 4h18v12H9l-5 4v-4H3z M7 9h10 M7 12h7'
+};
+const icon = key => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[key]}"/></svg>`;
+const data = {
+  gta: {
+    subtitle:'Global Training Academy', place:'Site', locations:['Douala · Tous les sites','Douala · Siège','Douala · Annexe'],
+    title:'Pilotage des formations', primary:['Faire l’appel','sessions'], highlights:[['4','Sessions du jour','calendar','sessions'],['18','Inscriptions','people','apprenants'],['3','Présences à saisir','check','sessions','À traiter']],
+    list:['sessions','Sessions du jour'], alerts:'À traiter',
+    pages:{
+      sessions:['Formations','calendar',[['Excel et analyse de données','09:00 – 12:00 · Salle A1','À traiter',1],['Gestion de projet','13:30 – 16:30 · Salle B2','À traiter',1],['Marketing digital','14:00 – 17:00 · Salle C1','À traiter',2],['Comptabilité pratique','10:00 – 12:00 · Salle C2','Terminé',2]]],
+      apprenants:['Apprenants','people',[['Inscriptions à valider','5 demandes en attente','À traiter',1],['Dossiers complets','13 dossiers','Terminé',2]]],
+      planning:['Planning','calendar',[['Sessions du matin','2 sessions prévues','Planifié',1],['Sessions de l’après-midi','2 sessions prévues','Planifié',2]]],
+      pedagogie:['Pédagogie','book',[['Supports de cours','Gestion de projet','Disponible',1],['Évaluations','Marketing digital','À traiter',2]]],
+      finances:['Finances','chart',[['Encaissements des formations','680 000 FCFA','Enregistré',1],['Échéances apprenants','3 échéances','À traiter',2]]]
+    },
+    queue:[['Inscriptions à valider','5 demandes en attente','apprenants'],['Présences à saisir','3 sessions concernées','sessions']]
+  },
+  glomari: {
+    subtitle:'Global Market International', place:'Magasin', locations:['Douala · Tous les magasins','Douala · Akwa','Douala · Bonanjo'],
+    title:'Pilotage des opérations', primary:['Préparer les commandes','commandes'], highlights:[['8','Commandes à préparer','box','commandes','À traiter'],['9','Articles sous le seuil','check','stocks','À traiter'],['1 850 000 FCFA','Ventes du jour','chart','caisse']],
+    list:['commandes','Commandes à préparer'], alerts:'Alertes prioritaires',
+    pages:{
+      commandes:['Commandes','box',[['CMD-014872','Marketplace · 3 articles','À traiter',1],['CMD-014871','Marketplace · 2 articles','À traiter',2],['CMD-014870','Retrait magasin · 4 articles','À traiter',1],['CMD-014869','Retrait magasin · 1 article','Terminé',2]]],
+      caisse:['Caisse','chart',[['Ventes en magasin','1 850 000 FCFA','Enregistré',1],['Clôture de caisse','Magasin de Bonanjo','À traiter',2]]],
+      stocks:['Stocks et achats','check',[['Stock faible · Akwa','6 articles sous le seuil','À traiter',1],['Stock faible · Bonanjo','3 articles sous le seuil','À traiter',2]]],
+      catalogue:['Catalogue','book',[['Ventilateur de table','Fiche de vente publiée','Disponible',1],['Lampe rechargeable','Brouillon en cours','À traiter',2]]],
+      care:['Service client','chat',[['TIC-00231','Question sur le retrait en magasin','À traiter',1],['TIC-00229','Suivi de livraison','Terminé',2]]],
+      finances:['Finances','chart',[['Dépenses du jour','381 000 FCFA','Enregistré',1],['Achats approuvés','544 000 FCFA','Enregistré',2]]]
+    },
+    queue:[['Stock sous le seuil','9 articles concernés','stocks'],['Tickets Care en attente','5 demandes à traiter','care']]
+  }
+};
+const positions = {gta:{page:'home',filter:'Tous',place:0},glomari:{page:'home',filter:'Tous',place:0}};
+const space = byId('space'), place = byId('place'), search = byId('search'), drawer = byId('drawer');
+const app = () => data[space.value];
+const state = () => positions[space.value];
+const button = (label, page, css='quiet', filter='Tous') => `<button class="${css}" data-page="${page}" data-filter="${filter}">${label}</button>`;
+const norm = value => value.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+function nav() {
+  const entries = [['home',['Accueil','home']],...Object.entries(app().pages)];
+  byId('nav').innerHTML = entries.map(([id,[label,key]]) => `<button class="navitem" data-page="${id}" ${state().page===id?'aria-current="page"':''}>${icon(key)}${label}</button>`).join('');
+}
+function applySpace() {
+  document.documentElement.dataset.space = space.value;
+  byId('brand').innerHTML = space.value === 'gta'
+    ? '<img src="Logo GTA.png" alt="GTA · Global Training Academy">'
+    : '<strong>GL<mark>O</mark>MARI</strong><small>Global Market International</small>';
+  byId('placeLabel').firstChild.textContent = app().place;
+  place.innerHTML = app().locations.map((name,i) => `<option value="${i}">${name}</option>`).join('');
+  place.value = state().place;
+}
+function rows(page, filter, query='') {
+  const entries = app().pages[page][2].map((row,i)=>({row,i})).filter(({row}) =>
+    (!state().place || state().place===row[3]) &&
+    (filter==='Tous' || row[2]===filter) &&
+    norm(row.join(' ')).includes(norm(query)));
+  return entries.length ? entries.map(({row:[name,desc,status],i}) => `<div class="row"><div><strong>${name}</strong><span class="muted">${desc}</span><span class="pill">${status}</span></div><button class="quiet" data-detail="${page}:${i}" aria-label="Ouvrir la fiche ${name}">${page==='sessions' && status==='À traiter'?'Faire l’appel':'Ouvrir'}</button></div>`).join('') : '<p class="empty">Aucun résultat pour cette sélection.</p>';
+}
+function render(animate=true) {
+  const d=app(), s=state(), q=search.value.trim(), content=byId('content');
+  const title=q?'Résultats de recherche':s.page==='home'?d.title:d.pages[s.page][0];
+  let body;
+  if (q) {
+    body=Object.entries(d.pages).flatMap(([id,[name]])=>{
+      const list=rows(id,'Tous',q);
+      return list.startsWith('<p')?[]:[`<section class="card"><h2>${name}</h2>${list}</section>`];
+    }).join('') || '<p class="empty">Aucun résultat dans cet espace et ce lieu.</p>';
+  } else if(s.page==='home') {
+    body=`<div class="metrics">${d.highlights.map(([number,label,key,page,filter])=>`<button class="metric" data-page="${page}" data-filter="${filter||'Tous'}"><span class="badge-icon">${icon(key)}</span><span><strong>${number}</strong><span class="muted">${label}</span></span></button>`).join('')}</div>
+      <div class="columns"><section class="card"><div class="heading"><h2>${d.list[1]}</h2>${button('Voir la liste',d.list[0])}</div>${rows(d.list[0],space.value==='gta'?'Tous':'À traiter')}</section>
+      <section class="card"><h2>${d.alerts}</h2>${d.queue.map(([label,desc,page])=>`<div class="row"><div><strong>${label}</strong><span class="muted">${desc}</span></div>${button('Voir',page,'quiet','À traiter')}</div>`).join('')}</section></div>`;
+  } else {
+    body=`<section class="card"><div class="filters" aria-label="Filtrer par statut">${['Tous','À traiter'].map(f=>`<button class="filter" data-page="${s.page}" data-filter="${f}" aria-pressed="${s.filter===f}">${f}</button>`).join('')}</div>${rows(s.page,s.filter)}</section>`;
+  }
+  content.innerHTML=`<div ${animate?'class="page"':''}><div class="intro"><div><p class="muted">${space.options[space.selectedIndex].text} · ${d.locations[s.place]}</p><h1 tabindex="-1">${title}</h1></div>${!q&&s.page==='home'?button(d.primary[0],d.primary[1],'primary','À traiter'):''}</div>${body}</div>`;
+}
+let trigger;
+function openDetail(value, origin) {
+  const [page,i]=value.split(':');
+  const [name,description,status,location]=app().pages[page][2][i];
+  byId('detail').innerHTML=`<h2 id="detail-title" class="drawer-title">${name}</h2><p class="muted">${description}</p><dl><dt>Statut</dt><dd>${status}</dd><dt>${app().place}</dt><dd>${app().locations[location]}</dd></dl>`;
+  trigger=origin;
+  drawer.showModal();
+}
+function closeMenu(){
+  byId('shell').classList.remove('menu-open');
+  byId('menu').setAttribute('aria-expanded','false');
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('button');
+  if(!b)return;
+  if(b.dataset.detail){openDetail(b.dataset.detail,b);return;}
+  if(!b.dataset.page)return;
+  const filtering=b.classList.contains('filter');
+  state().page=b.dataset.page;state().filter=b.dataset.filter||'Tous';search.value='';
+  closeMenu();nav();render(!filtering);
+  if(filtering) byId('content').querySelector('[aria-pressed="true"]').focus();
+  else byId('content').querySelector('h1').focus();
+});
+byId('menu').addEventListener('click',()=>{
+  const open=byId('shell').classList.toggle('menu-open');
+  byId('menu').setAttribute('aria-expanded',String(open));
+});
+byId('close').addEventListener('click',()=>drawer.close());
+drawer.addEventListener('click',e=>{if(e.target===drawer){const r=drawer.getBoundingClientRect();if(e.clientX<r.left)drawer.close();}});
+drawer.addEventListener('close',()=>trigger?.focus());
+space.addEventListener('change',()=>{search.value='';closeMenu();applySpace();nav();render();});
+place.addEventListener('change',()=>{state().place=Number(place.value);render(false);});
+search.addEventListener('input',()=>render(false));
+applySpace();nav();render();
+</script>
+</html>

@@ -5,31 +5,40 @@ const ETATS_FICHES_VENTE = [
   ["publie_et_brouillon", "Publié et brouillon"], ["remplace", "Remplacé"], ["retire", "Retiré"],
 ];
 
-async function ecranFichesVente(branche, filtres = {}) {
+async function ecranFichesVente(branche = filtresEcran("fichesVente", {}).branche, filtres = filtresEcran("fichesVente", {}).filtres ?? {}, retour) {
   const branches = await branchesStudioCommerce();
   const b = branches.find((e) => e.id === branche)?.id ?? branches[0]?.id;
   if (!b) return vue(h("h1", {}, "Fiches de vente"), h("p", {}, "Aucune branche de commerce."));
   const q = new URLSearchParams({ branche: b });
+  const titre = h("h1", { tabindex: "-1" }, "Fiches de vente");
   if (filtres.etat) q.set("etat", filtres.etat);
   if (filtres.recherche) q.set("recherche", filtres.recherche);
   let liste;
   try {
     const articles = await api("GET", `/fiches-vente?${q}`);
+    garderFiltresEcran("fichesVente", { branche: b, filtres });
     liste = articles.length ? tableau(["Code", "Article", "État", ""], articles.map((a) => h("tr", {},
       h("td", {}, a.code), h("td", {}, a.nom), h("td", {}, libelle(ETATS_FICHES_VENTE, a.etat)),
-      h("td", {}, h("button", { class: "discret", onclick: () => ecranFicheVente(a.id, () => ecranFichesVente(b, filtres)) }, "Ouvrir")))))
+      h("td", {}, h("button", { class: "discret", id: `fiche-vente-${a.id}`, onclick: () => {
+        const position = { id: a.id, scroll: window.scrollY };
+        return ecranFicheVente(a.id, () => ecranFichesVente(b, filtres, position));
+      } }, "Ouvrir")))))
       : h("p", {}, "Aucun article pour ces filtres.");
   } catch (e) {
     if (e.code !== "permission_refusee" && e.code !== "module_inactif") throw e;
     liste = h("p", { role: "status" }, MESSAGES[e.code]);
   }
-  vue(h("h1", {}, "Fiches de vente"),
+  vue(titre,
     branches.length > 1 ? formulaire((v) => ecranFichesVente(v.branche),
       [choix("branche", "Branche", branches.map((e) => [e.id, e.nom]), b)], "Afficher") : null,
     formulaire((v) => ecranFichesVente(b, v), [h("div", { class: "grille" },
       champ("Nom ou code de l’article", { name: "recherche", maxlength: 100, value: filtres.recherche }),
       choix("etat", "État", [["", "Tous"], ...ETATS_FICHES_VENTE.slice(0, 4)], filtres.etat || ""))], "Filtrer"),
     liste);
+  if (retour) {
+    window.scrollTo(0, retour.scroll);
+    (document.getElementById(`fiche-vente-${retour.id}`) || titre).focus({ preventScroll: true });
+  }
 }
 
 function contenuFicheVente(v) {

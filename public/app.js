@@ -431,101 +431,288 @@ const ESPACES = [["formation", "GTA"], ["commerce", "GLOMARI"]];
 const DROITS_COMMERCE = ["achats.voir", "stocks.voir", "magasins.gerer", "caisse.vendre", "transport.voir", "care.voir", "reseau.voir", "mall.voir"];
 const DROITS_FORMATION = ["formations.voir", "apprentissage.voir", "mentorat.voir", "foundation.voir", "coaching.voir", "universite.voir"];
 const aDroitDe = (liste) => liste.some((d) => droits.includes(d));
-const deuxEspaces = () => aDroitDe(DROITS_COMMERCE) && aDroitDe(DROITS_FORMATION);
+let permissionsParEspace;
+function espacesDisponibles() {
+  if (permissionsParEspace) return ESPACES.filter(([code]) => permissionsParEspace[code]?.length);
+  return ESPACES.filter(([code]) => aDroitDe(code === "formation" ? DROITS_FORMATION : DROITS_COMMERCE));
+}
+const deuxEspaces = () => espacesDisponibles().length === 2;
 function espaceCourant() {
-  if (!aDroitDe(DROITS_COMMERCE)) return "formation";
-  if (!aDroitDe(DROITS_FORMATION)) return "commerce";
-  return lireLocal(localStorage, "smarte.espace", "formation");
+  const possibles = espacesDisponibles();
+  const prefere = lireLocal(localStorage, "smarte.espace", "formation");
+  return possibles.find(([code]) => code === prefere)?.[0] || possibles[0]?.[0] || "formation";
 }
 const dansEspace = (e) => espaceCourant() === e;
-function choisirEspace(e) {
+const droitsDansEspace = (espace = espaceCourant()) => permissionsParEspace?.[espace] ?? droits;
+const destinationsParEspace = new Map();
+const filtresParEspace = new Map();
+let focusNavigation = false;
+let compteNavigation;
+
+function lireContexteNavigation(moi) {
+  if (compteNavigation === moi.id || !moi.id) return;
+  compteNavigation = moi.id;
+  const contexte = lireLocal(sessionStorage, `smarte.navigation.${compteNavigation}`, {}) ?? {};
+  destinationsParEspace.clear();
+  filtresParEspace.clear();
+  for (const [espace] of ESPACES) {
+    const nom = contexte.destinations?.[espace];
+    if (typeof nom === "string") destinationsParEspace.set(espace, nom);
+    if (contexte.filtres?.[espace]) filtresParEspace.set(espace, contexte.filtres[espace]);
+  }
+  contexteSessions = contexte.sessions || {};
+  filtresCommandesWeb = contexte.commandes || { statut: "", lieu: "" };
+  contexteTicketsParEspace.clear();
+  for (const [espace] of ESPACES) {
+    if (contexte.tickets?.[espace]) contexteTicketsParEspace.set(espace, contexte.tickets[espace]);
+  }
+}
+
+function garderContexteNavigation() {
+  if (!compteNavigation) return;
+  ecrireLocal(sessionStorage, `smarte.navigation.${compteNavigation}`, {
+    destinations: Object.fromEntries(destinationsParEspace),
+    filtres: Object.fromEntries(filtresParEspace),
+    sessions: contexteSessions,
+    commandes: filtresCommandesWeb,
+    tickets: Object.fromEntries(contexteTicketsParEspace),
+  });
+}
+
+function filtresEcran(nom, defaut) {
+  return filtresParEspace.get(espaceCourant())?.[nom] ?? defaut;
+}
+
+function garderFiltresEcran(nom, filtres) {
+  const espace = espaceCourant();
+  filtresParEspace.set(espace, { ...filtresParEspace.get(espace), [nom]: filtres });
+  garderContexteNavigation();
+}
+
+async function choisirEspace(e) {
+  if (!deuxEspaces() || !ESPACES.some(([code]) => code === e) || e === espaceCourant()) return;
+  if (!confirmerNavigation()) {
+    const selecteur = racine.querySelector(".choix-espace");
+    if (selecteur) selecteur.value = espaceCourant();
+    return;
+  }
+  garderContexteNavigation();
   ecrireLocal(localStorage, "smarte.espace", e);
   navigation += 1;
-  ecranAccueil();
+  await ecranAccueil(true);
+}
+
+function groupesNavigation() {
+  const droits = droitsDansEspace();
+  return [
+    ["Accueil", [
+      ["Tableau de bord", ecranTableauDeBord],
+      ["Mon espace", ecranMonEspace],
+      ["Agenda", ecranAgenda, droits.includes("agenda.voir")],
+      ["Tâches", ecranTaches],
+    ]],
+    ["Formation", [
+      ["Formations", ecranSessions, dansEspace("formation") && droits.includes("formations.voir")],
+      ["Cours en ligne", ecranCours, dansEspace("formation") && droits.includes("apprentissage.voir")],
+      ["Mentorat", ecranMentorats, dansEspace("formation") && droits.includes("mentorat.voir")],
+      ["Foundation", ecranFoundation, dansEspace("formation") && droits.includes("foundation.voir")],
+      ["Coaching", ecranCoaching, dansEspace("formation") && droits.includes("coaching.voir")],
+      ["Université", ecranUniversite, dansEspace("formation") && droits.includes("universite.voir")],
+    ]],
+    ["Ventes et commandes", [
+      ["Caisse", ecranCaisse, dansEspace("commerce") && droits.includes("caisse.vendre")],
+      ["Commandes en ligne", ecranCommandesEnLigne, dansEspace("commerce") && droits.includes("facturation.voir")],
+      ["Précommandes", ecranPrecommandes, dansEspace("commerce") && (droits.includes("achats.voir") || droits.includes("facturation.voir"))],
+      ["Mall", ecranMall, dansEspace("commerce") && droits.includes("mall.voir")],
+      ["Portail grossiste", ecranPortail, dansEspace("commerce") && droits.includes("facturation.voir") && droits.includes("stocks.voir")],
+      ["Vendeurs et gros", ecranReseau, dansEspace("commerce") && droits.includes("reseau.voir")],
+    ]],
+    ["Stocks et achats", [
+      ["Achats", ecranAchats, dansEspace("commerce") && droits.includes("achats.voir")],
+      ["Stocks", ecranStocks, dansEspace("commerce") && droits.includes("stocks.voir")],
+      ["Dépôt-vente", ecranDepotVente, dansEspace("commerce") && (droits.includes("achats.voir") || droits.includes("stocks.voir"))],
+      ["Magasins", ecranMagasins, dansEspace("commerce") && droits.includes("magasins.gerer")],
+      ["Rapports stock et ventes", ecranRapportsStockVentes, dansEspace("commerce") && (droits.includes("stocks.voir") || droits.includes("caisse.superviser"))],
+      ["Rayons et étiquettes", ecranRayons, dansEspace("commerce") && droits.includes("stocks.voir")],
+      ["Entrepôt et importation", ecranLogistique, dansEspace("commerce") && droits.includes("stocks.voir")],
+      ["Points relais", ecranRelais, dansEspace("commerce") && droits.includes("transport.voir")],
+      ["Livraisons", ecranLivraisons, dansEspace("commerce") && droits.includes("transport.voir")],
+    ]],
+    ["Clients et marketing", [
+      ["Clients", ecranClients, droits.includes("crm.voir")],
+      ["Prospection", ecranProspection, droits.includes("crm.voir")],
+      ["Promotions", ecranPromotions, droits.includes("catalogue.gerer")],
+      ["Marketing", ecranMarketing, droits.includes("marketing.voir")],
+      ["Fiches de vente", ecranFichesVente, dansEspace("commerce") && droits.includes("marketing.voir")],
+      ["Événements", ecranEvenements, droits.includes("marketing.voir")],
+      ["Affiliés", ecranAffilies, droits.includes("affiliation.voir")],
+      ["GLOMARI Care", ecranCare, dansEspace("commerce") && droits.includes("care.voir")],
+      ["Assistant Care", ecranAssistantCare, dansEspace("commerce") && (droits.includes("care.voir") || droits.includes("support.voir"))],
+      ["Service client", ecranSupport, droits.includes("support.voir")],
+      ["Messages aux clients", ecranMessagesClients, dansEspace("commerce") && (droits.includes("care.voir") || droits.includes("facturation.administrer"))],
+    ]],
+    ["Finances", [
+      ["Facturation", ecranFacturation, droits.includes("facturation.voir")],
+      ["Recouvrement", ecranRecouvrement, droits.includes("facturation.voir")],
+      ["Comptabilité", ecranCompta, droits.includes("compta.voir")],
+      ["Trésorerie", ecranTresorerie, droits.includes("tresorerie.voir")],
+    ]],
+    ["Équipe et administration", [
+      ["RH", ecranRh, droits.includes("rh.voir")],
+      ["Performance", ecranPerformance],
+      ["Tour de contrôle", ecranTour, droits.includes("pilotage.voir")],
+      ["Pilotage", ecranPilotage, droits.includes("pilotage.voir")],
+      ["Documents", ecranDocuments, droits.includes("documents.voir") || droits.includes("rh.voir") || droits.includes("compta.voir")],
+      ["Indicateurs", ecranIndicateurs],
+      ["Accès", ecranAcces, droits.includes("utilisateurs.gerer")],
+    ]],
+  ];
+}
+
+function menuNavigation() {
+  const espace = espaceCourant();
+  const actif = destinationsParEspace.get(espace);
+  return h("nav", {
+    class: "navigation pas-imprimer", id: "menu-modules", "aria-label": "Modules",
+    onkeydown: (e) => {
+      if (e.key !== "Escape" || !e.currentTarget.classList.contains("ouvert")) return;
+      e.preventDefault();
+      e.currentTarget.classList.remove("ouvert");
+      const bouton = racine.querySelector(".bouton-menu");
+      bouton?.setAttribute("aria-expanded", "false");
+      bouton?.focus();
+    },
+  },
+    groupesNavigation().map(([titre, entrees]) => {
+      const visibles = entrees.filter(([, , permis = true]) => permis);
+      if (!visibles.length) return null;
+      return h("div", { class: "groupe-navigation", role: "group", "aria-label": titre },
+        h("div", { class: "titre-navigation", "aria-hidden": "true" }, titre),
+        visibles.map(([nom, ouvrir]) => h("button", {
+          class: "discret", "aria-current": actif === nom ? "page" : null,
+          onclick: () => ouvrirDestination(nom, ouvrir),
+        }, nom)));
+    }));
+}
+
+function confirmerNavigation(zone = racine.querySelector("main")) {
+  return !zone?.querySelector("form[data-saisie-modifiee]") || window.confirm("Quitter cette page ? La saisie en cours sera perdue.");
+}
+
+async function ouvrirDestination(nom, ouvrir, depuisAccueil = false) {
+  if (!depuisAccueil && !confirmerNavigation()) return;
+  const espace = espaceCourant();
+  const precedente = destinationsParEspace.get(espace);
+  const depart = ++navigation;
+  const ancienContenu = racine.querySelector("main");
+  const statut = racine.querySelector(".statut-navigation");
+  ancienContenu?.setAttribute("aria-busy", "true");
+  if (statut) statut.textContent = `Ouverture de ${nom}…`;
+  destinationsParEspace.set(espace, nom);
+  focusNavigation = true;
+  try {
+    await ouvrir();
+    if (depart === navigation) garderContexteNavigation();
+  } catch (e) {
+    if (depart === navigation && jeton) {
+      destinationsParEspace.set(espace, precedente);
+      focusNavigation = false;
+    }
+    throw e;
+  } finally {
+    if (depart === navigation) {
+      ancienContenu?.removeAttribute("aria-busy");
+      if (statut) statut.textContent = "";
+    }
+  }
 }
 
 function vue(...contenu) {
+  const espace = espaceCourant();
+  const nomEspace = ESPACES.find(([code]) => code === espace)?.[1] || "SMARTE";
+  if (document.documentElement.dataset.espace !== espace) {
+    document.documentElement.dataset.espace = espace;
+    document.documentElement.style.removeProperty("--marine");
+  }
   if (typeof appliquerCharte === "function") appliquerCharte();
-  const nav = () => racine.querySelector("nav.navigation")?.addEventListener("click", () => { navigation += 1; }, true);
+  const defilementMenu = racine.querySelector("nav.navigation")?.scrollTop ?? 0;
   // Sur téléphone, le menu vertical se replie derrière le bouton « Menu ».
   const basculerMenu = (e) => {
-    const ouvert = racine.querySelector("nav.navigation")?.classList.toggle("ouvert");
+    const menu = racine.querySelector("nav.navigation");
+    const ouvert = menu?.classList.toggle("ouvert");
     e.currentTarget.setAttribute("aria-expanded", ouvert ? "true" : "false");
+    if (ouvert) (menu.querySelector('[aria-current="page"]') || menu.querySelector("button"))?.focus();
   };
   racine.replaceChildren(
-    h("header", { class: "barre" },
+    h("a", { class: "lien-evitement pas-imprimer", href: "#contenu-smarte" }, "Aller au contenu"),
+    h("p", { class: "statut-navigation pas-imprimer", role: "status" }),
+    h("header", { class: "barre barre-espace" },
       h("button", { class: "discret bouton-menu pas-imprimer", "aria-expanded": "false", "aria-controls": "menu-modules", onclick: basculerMenu }, "Menu"),
-      h("strong", {}, "Smarte Solutions"),
-      deuxEspaces() ? h("select", { class: "choix-espace pas-imprimer", "aria-label": "Espace de travail", onchange: (e) => choisirEspace(e.target.value) },
-        ESPACES.map(([c, l]) => h("option", { value: c, selected: c === espaceCourant() }, l))) : null,
-      h("input", { class: "recherche-globale pas-imprimer", type: "search", placeholder: "Rechercher", "aria-label": "Recherche globale", onkeydown: (e) => { if (e.key === "Enter" && e.target.value.trim().length >= 2) ecranRecherche(e.target.value.trim()); } }),
+      h("strong", { class: "marque-espace" }, nomEspace),
+      deuxEspaces() ? h("label", { class: "selecteur-espace pas-imprimer" }, "Espace de travail",
+        h("select", { class: "choix-espace", onchange: (e) => choisirEspace(e.target.value) },
+          ESPACES.map(([c, l]) => h("option", { value: c, selected: c === espaceCourant() }, l)))) : null,
+      h("input", { class: "recherche-globale pas-imprimer", type: "search", maxlength: 100, placeholder: `Rechercher dans ${nomEspace}`, "aria-label": `Rechercher dans ${nomEspace}`, onkeydown: (e) => { if (e.key === "Enter" && e.target.value.trim().length >= 2) ecranRecherche(e.target.value.trim()); } }),
       h("button", { class: "discret", onclick: () => ecranNotifications() }, "Notifications"),
       h("button", { class: "discret bouton-compte", onclick: () => ecranCompte() }, "Mon compte"),
       h("button", { class: "discret", onclick: sortir }, "Se déconnecter")),
     h("div", { class: "cadre" },
-    h("nav", { class: "navigation pas-imprimer", id: "menu-modules", "aria-label": "Modules" },
-      h("button", { class: "discret", onclick: () => ecranTableauDeBord() }, "Tableau de bord"),
-      dansEspace("formation") && droits.includes("formations.voir") ? h("button", { class: "discret", onclick: ecranSessions }, "Formations") : null,
-      droits.includes("crm.voir") ? h("button", { class: "discret", onclick: () => ecranClients() }, "Clients") : null,
-      droits.includes("facturation.voir") ? h("button", { class: "discret", onclick: () => ecranFacturation() }, "Facturation") : null,
-      dansEspace("commerce") && droits.includes("achats.voir") ? h("button", { class: "discret", onclick: () => ecranAchats() }, "Achats") : null,
-      dansEspace("commerce") && (droits.includes("achats.voir") || droits.includes("facturation.voir")) ? h("button", { class: "discret", onclick: () => ecranPrecommandes() }, "Précommandes") : null,
-      dansEspace("commerce") && droits.includes("stocks.voir") ? h("button", { class: "discret", onclick: () => ecranStocks() }, "Stocks") : null,
-      dansEspace("commerce") && (droits.includes("achats.voir") || droits.includes("stocks.voir")) ? h("button", { class: "discret", onclick: () => ecranDepotVente() }, "Dépôt-vente") : null,
-      dansEspace("commerce") && (droits.includes("care.voir") || droits.includes("facturation.administrer")) ? h("button", { class: "discret", onclick: () => ecranMessagesClients() }, "Messages aux clients") : null,
-      dansEspace("commerce") && droits.includes("magasins.gerer") ? h("button", { class: "discret", onclick: () => ecranMagasins() }, "Magasins") : null,
-      dansEspace("commerce") && (droits.includes("stocks.voir") || droits.includes("caisse.superviser")) ? h("button", { class: "discret", onclick: () => ecranRapportsStockVentes() }, "Rapports stock et ventes") : null,
-      dansEspace("commerce") && droits.includes("caisse.vendre") ? h("button", { class: "discret", onclick: () => ecranCaisse() }, "Caisse") : null,
-      dansEspace("formation") && droits.includes("apprentissage.voir") ? h("button", { class: "discret", onclick: () => ecranCours() }, "Cours en ligne") : null,
-      droits.includes("rh.voir") ? h("button", { class: "discret", onclick: () => ecranRh() }, "RH") : null,
-      dansEspace("commerce") && droits.includes("mall.voir") ? h("button", { class: "discret", onclick: () => ecranMall() }, "Mall") : null,
-      dansEspace("commerce") && droits.includes("stocks.voir") ? h("button", { class: "discret", onclick: () => ecranRayons() }, "Rayons et étiquettes") : null,
-      dansEspace("commerce") && droits.includes("transport.voir") ? h("button", { class: "discret", onclick: () => ecranRelais() }, "Points relais") : null,
-      dansEspace("commerce") && droits.includes("facturation.voir") && droits.includes("stocks.voir") ? h("button", { class: "discret", onclick: () => ecranPortail() }, "Portail grossiste") : null,
-      dansEspace("commerce") && droits.includes("facturation.voir") ? h("button", { class: "discret", onclick: () => ecranCommandesEnLigne() }, "Commandes en ligne") : null,
-      dansEspace("commerce") && droits.includes("care.voir") ? h("button", { class: "discret", onclick: () => ecranCare() }, "GLOMARI Care") : null,
-      dansEspace("commerce") && (droits.includes("care.voir") || droits.includes("support.voir")) ? h("button", { class: "discret", onclick: () => ecranAssistantCare() }, "Assistant Care") : null,
-      dansEspace("commerce") && droits.includes("reseau.voir") ? h("button", { class: "discret", onclick: () => ecranReseau() }, "Vendeurs et gros") : null,
-      h("button", { class: "discret", onclick: () => ecranMonEspace() }, "Mon espace"),
-      droits.includes("pilotage.voir") ? h("button", { class: "discret", onclick: () => ecranTour() }, "Tour de contrôle") : null,
-      droits.includes("documents.voir") || droits.includes("rh.voir") || droits.includes("compta.voir") ? h("button", { class: "discret", onclick: () => ecranDocuments() }, "Documents") : null,
-      droits.includes("agenda.voir") ? h("button", { class: "discret", onclick: () => ecranAgenda() }, "Agenda") : null,
-      droits.includes("catalogue.gerer") ? h("button", { class: "discret", onclick: () => ecranPromotions() }, "Promotions") : null,
-      dansEspace("commerce") && droits.includes("stocks.voir") ? h("button", { class: "discret", onclick: () => ecranLogistique() }, "Entrepôt et importation") : null,
-      droits.includes("crm.voir") ? h("button", { class: "discret", onclick: () => ecranProspection() }, "Prospection") : null,
-      droits.includes("facturation.voir") ? h("button", { class: "discret", onclick: () => ecranRecouvrement() }, "Recouvrement") : null,
-      droits.includes("marketing.voir") ? h("button", { class: "discret", onclick: () => ecranMarketing() }, "Marketing") : null,
-      droits.includes("marketing.voir") ? h("button", { class: "discret", onclick: () => ecranFichesVente() }, "Fiches de vente") : null,
-      droits.includes("marketing.voir") ? h("button", { class: "discret", onclick: () => ecranEvenements() }, "Événements") : null,
-      h("button", { class: "discret", onclick: () => ecranPerformance() }, "Performance"),
-      droits.includes("pilotage.voir") ? h("button", { class: "discret", onclick: () => ecranPilotage() }, "Pilotage") : null,
-      droits.includes("affiliation.voir") ? h("button", { class: "discret", onclick: () => ecranAffilies() }, "Affiliés") : null,
-      dansEspace("commerce") && droits.includes("transport.voir") ? h("button", { class: "discret", onclick: () => ecranLivraisons() }, "Livraisons") : null,
-      droits.includes("compta.voir") ? h("button", { class: "discret", onclick: () => ecranCompta() }, "Comptabilité") : null,
-      droits.includes("tresorerie.voir") ? h("button", { class: "discret", onclick: () => ecranTresorerie() }, "Trésorerie") : null,
-      droits.includes("support.voir") ? h("button", { class: "discret", onclick: () => ecranSupport() }, "Service client") : null,
-      h("button", { class: "discret", onclick: () => ecranTaches() }, "Tâches"),
-      h("button", { class: "discret", onclick: () => ecranIndicateurs() }, "Indicateurs"),
-      droits.includes("utilisateurs.gerer") ? h("button", { class: "discret", onclick: () => ecranAcces() }, "Accès") : null,
-      dansEspace("formation") && droits.includes("mentorat.voir") ? h("button", { class: "discret", onclick: () => ecranMentorats() }, "Mentorat") : null,
-      dansEspace("formation") && droits.includes("foundation.voir") ? h("button", { class: "discret", onclick: () => ecranFoundation() }, "Foundation") : null,
-      dansEspace("formation") && droits.includes("coaching.voir") ? h("button", { class: "discret", onclick: () => ecranCoaching() }, "Coaching") : null,
-      dansEspace("formation") && droits.includes("universite.voir") ? h("button", { class: "discret", onclick: () => ecranUniversite() }, "Université") : null),
-    h("main", {}, contenu)));
-  nav();
+    menuNavigation(),
+    h("main", {
+      id: "contenu-smarte", tabindex: "-1", class: focusNavigation ? "arrivee-ecran" : null,
+      oninput: signalerSaisie, onchange: signalerSaisie,
+    }, contenu)));
+  racine.querySelector("nav.navigation").scrollTop = defilementMenu;
   window.scrollTo(0, 0);
+  if (focusNavigation) {
+    const cible = racine.querySelector("main h1") || racine.querySelector("main");
+    cible.setAttribute("tabindex", "-1");
+    cible.focus({ preventScroll: true });
+    focusNavigation = false;
+  }
   if (typeof poserEntete === "function") poserEntete().catch(() => {});
 }
 
+function signalerSaisie(e) {
+  const formulaire = e.target.closest("form");
+  if (formulaire) formulaire.dataset.saisieModifiee = "";
+}
+
 /** Après la connexion : le tableau de bord pour qui suit les chiffres, l'écran de travail pour les autres. */
-async function ecranAccueil() {
-  droits = (await api("GET", "/moi")).permissions;
-  return aDroitDe(["tresorerie.voir", "pilotage.voir"]) ? ecranTableauDeBord() : ecranSessions();
+async function ecranAccueil(restaurer = false) {
+  const moi = await api("GET", "/moi");
+  droits = moi.permissions;
+  permissionsParEspace = moi.permissionsParEspace;
+  lireContexteNavigation(moi);
+  const espace = espaceCourant();
+  const nom = restaurer ? destinationsParEspace.get(espace) : null;
+  const destination = groupesNavigation().flatMap(([, entrees]) => entrees)
+    .find(([libelle, , autorise = true]) => libelle === nom && autorise);
+  if (destination) return ouvrirDestination(destination[0], destination[1], true);
+  const droitsEspace = droitsDansEspace(espace);
+  const accueilMetier = espace === "formation" ? ["formations.voir"] : ["facturation.voir", "stocks.voir"];
+  if (["tresorerie.voir", "pilotage.voir", ...accueilMetier].some((p) => droitsEspace.includes(p))) {
+    return ouvrirDestination("Tableau de bord", ecranTableauDeBord, true);
+  }
+  destinationsParEspace.delete(espace);
+  return ecranSessions();
 }
 
 function sortir() {
   if (jeton) fetch("/deconnexion", { method: "POST", headers: { authorization: `Bearer ${jeton}` } }).catch(() => {});
   jeton = null;
+  navigation += 1;
+  if (compteNavigation) sessionStorage.removeItem(`smarte.navigation.${compteNavigation}`);
+  compteNavigation = undefined;
+  destinationsParEspace.clear();
+  filtresParEspace.clear();
+  contexteTicketsParEspace.clear();
+  permissionsParEspace = undefined;
+  contexteSessions = {};
+  filtresCommandesWeb = { statut: "", lieu: "" };
+  focusNavigation = false;
+  delete document.documentElement.dataset.espace;
+  document.documentElement.style.removeProperty("--marine");
   sessionStorage.removeItem("jeton");
   sessionStorage.removeItem("smarte.caisse");
   if (typeof oublierSession === "function") oublierSession();
@@ -537,16 +724,22 @@ function formulaire(action, enfants, libelle) {
   const zone = h("div");
   const bouton = h("button", { type: "submit" }, libelle);
   const f = h("form", {
+    oninput: () => { f.dataset.saisieModifiee = ""; },
+    onchange: () => { f.dataset.saisieModifiee = ""; },
     onsubmit: async (ev) => {
       ev.preventDefault();
+      if (bouton.disabled) return;
       zone.replaceChildren();
       bouton.disabled = true;
+      f.setAttribute("aria-busy", "true");
       try {
         await action(valeurs(f), f, zone);
+        if (!zone.querySelector(".erreur")) delete f.dataset.saisieModifiee;
       } catch (e) {
         if (e.code !== "expire" && e.code !== "obsolete") zone.replaceChildren(h("div", { class: "erreur", role: "alert" }, texteErreur(e)));
       } finally {
         bouton.disabled = false;
+        f.removeAttribute("aria-busy");
       }
     },
   }, zone, enfants, bouton);
@@ -555,7 +748,7 @@ function formulaire(action, enfants, libelle) {
 
 function ecranConnexion() {
   const zoneCode = h("div");
-  racine.replaceChildren(h("main", { class: "centre" }, h("div", { class: "carte" },
+  racine.replaceChildren(h("main", { class: "centre connexion-smarte" }, h("div", { class: "carte" },
     h("h1", {}, "Smarte Solutions"),
     h("p", { class: "discret-texte" }, "Connectez-vous à votre espace."),
     formulaire(async (v) => {
@@ -579,24 +772,65 @@ function ecranConnexion() {
     ], "Se connecter"))));
 }
 
-async function ecranSessions() {
+let contexteSessions = {};
+
+async function ecranSessions({ periodeChoisie = contexteSessions.periode, message, retour = false } = {}) {
   droits = (await api("GET", "/moi")).permissions;
   if (!droits.includes("formations.voir") || !dansEspace("formation")) return dansEspace("formation") && droits.includes("coaching.voir") ? ecranCoaching() : dansEspace("formation") && droits.includes("universite.voir") ? ecranUniversite() : droits.includes("caisse.vendre") ? ecranCaisse() : droits.includes("stocks.voir") ? ecranStocks() : droits.includes("rh.voir") ? ecranRh() : droits.includes("apprentissage.voir") ? ecranCours() : droits.includes("crm.voir") ? ecranClients() : droits.includes("support.voir") ? ecranSupport() : ecranTaches();
   const [sessions, programmes, entites] = await Promise.all([
     api("GET", "/sessions"), api("GET", "/programmes"), api("GET", "/entites"),
   ]);
-  const liste = sessions.map((s) => h("button", { class: "session", onclick: () => ecranSession(s.id) },
+  const recherche = h("input", { type: "search", value: contexteSessions.recherche || "", placeholder: "Programme, code, ville…" });
+  const periode = h("select", {},
+    h("option", { value: "", selected: !periodeChoisie }, "Toutes les sessions"),
+    h("option", { value: "jour", selected: periodeChoisie === "jour" }, "Sessions du jour"),
+    h("option", { value: "inscrits", selected: periodeChoisie === "inscrits" }, "Sessions avec inscrits"),
+    droits.includes("presences.saisir") ? h("option", { value: "appel", selected: periodeChoisie === "appel" }, "Présences à saisir") : null);
+  const tri = h("select", {},
+    h("option", { value: "recent" }, "Plus récentes"),
+    h("option", { value: "ancien", selected: contexteSessions.tri === "ancien" }, "Plus anciennes"));
+  const liste = h("div");
+  const titre = h("h1", { tabindex: "-1" }, "Sessions de formation");
+  const jour = aujourdhui();
+  const normaliser = (texte) => texte.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  const afficher = () => {
+    const q = normaliser(recherche.value.trim());
+    Object.assign(contexteSessions, { recherche: recherche.value, periode: periode.value, tri: tri.value });
+    garderContexteNavigation();
+    const selection = sessions.filter((s) => (periode.value !== "jour" || (s.debut <= jour && s.fin >= jour && s.statut !== "annulee"))
+      && (periode.value !== "inscrits" || s.inscrits > 0)
+      && (periode.value !== "appel" || s.appel_a_saisir)
+      && normaliser([s.programme, s.code, s.ville, s.lieu].join(" ")).includes(q))
+      .sort((a, b) => (tri.value === "ancien" ? 1 : -1) * a.debut.localeCompare(b.debut));
+    liste.replaceChildren(...(selection.length ? selection.map((s) => h("button", {
+      class: "session", id: `session-liste-${s.id}`,
+      onclick: () => {
+        Object.assign(contexteSessions, { id: s.id, scroll: window.scrollY });
+        garderContexteNavigation();
+        return ecranSession(s.id);
+      },
+    },
     h("div", { class: "ligne" },
       h("span", { class: "nom" }, s.programme),
       h("span", { class: "pastille ok" }, `${s.inscrits} inscrit${s.inscrits > 1 ? "s" : ""}`)),
-    h("div", { class: "discret-texte" }, `${s.code} · ${s.ville}${s.lieu ? `, ${s.lieu}` : ""} · du ${dateFr(s.debut)} au ${dateFr(s.fin)}`)));
+    h("div", { class: "discret-texte" }, `${s.code} · ${s.ville}${s.lieu ? `, ${s.lieu}` : ""} · du ${dateFr(s.debut)} au ${dateFr(s.fin)}`)))
+      : [h("p", { class: "discret-texte", role: "status" }, "Aucune session pour ces filtres.")]));
+  };
+  recherche.addEventListener("input", afficher);
+  periode.addEventListener("change", afficher);
+  tri.addEventListener("change", afficher);
+  afficher();
 
   const gta = entites.find((e) => e.code === "GTA") || entites[0];
   // Le serveur exige formations.gerer pour créer : on ne montre pas un formulaire qui serait refusé.
   const peutCreer = droits.includes("formations.gerer");
   vue(
-    h("h1", {}, "Sessions de formation"),
-    h("p", { class: "discret-texte" }, sessions.length ? "Choisissez une session." : "Aucune session pour le moment."),
+    titre,
+    message ? h("div", { class: "succes", role: "status" }, message) : null,
+    h("div", { class: "actions pas-imprimer" },
+      h("label", {}, "Rechercher une session", recherche),
+      h("label", {}, "Période", periode),
+      h("label", {}, "Trier par date", tri)),
     liste,
     peutCreer && programmes.length ? h("div", { class: "carte pas-imprimer" }, h("h2", {}, "Nouvelle session"),
       formulaire(async (v) => {
@@ -640,6 +874,10 @@ async function ecranSessions() {
           champ("Présence minimale pour le certificat (%)", { name: "seuil", type: "number", min: 0, max: 100, value: 75, required: true })),
       ], "Créer le programme")) : null,
   );
+  if (retour) {
+    window.scrollTo(0, contexteSessions.scroll || 0);
+    (document.getElementById(`session-liste-${contexteSessions.id}`) || titre).focus({ preventScroll: true });
+  }
 }
 
 /** Plan de paiement saisi ligne par ligne : "Libellé ; montant ; jours ou date". */
@@ -745,7 +983,7 @@ async function ecranSession(id, message) {
     champ("E-mail", { name: "email", type: "email" }))], "Inscrire");
 
   vue(
-    h("button", { class: "discret pas-imprimer", onclick: ecranSessions }, "← Toutes les sessions"),
+    h("button", { class: "discret pas-imprimer", onclick: () => ecranSessions({ retour: contexteSessions.id === id }) }, "← Sessions"),
     h("h1", {}, s.programme),
     droits.includes("formations.gerer") ? h("button", { class: "discret pas-imprimer", onclick: () => ecranGestionSession(id, s.code) }, "Coûts, attente, documents et codes") : null,
     h("p", { class: "discret-texte" }, `${s.code} · ${s.ville}${s.lieu ? `, ${s.lieu}` : ""} · du ${dateFr(s.debut)} au ${dateFr(s.fin)}`),
@@ -756,7 +994,7 @@ async function ecranSession(id, message) {
       h("div", { class: "chiffre" }, h("b", {}, fcfa(d.totaux.paye)), h("span", {}, "Encaissé")),
       h("div", { class: "chiffre" }, h("b", {}, fcfa(d.totaux.reste)), h("span", {}, "Reste à encaisser"))),
     h("div", { class: "actions pas-imprimer" },
-      h("button", { onclick: () => ecranAppel(id, d) }, "Faire l'appel"),
+      droits.includes("presences.saisir") ? h("button", { onclick: () => ecranAppel(id, d) }, "Faire l'appel") : null,
       h("button", { class: "discret", onclick: () => ecranAvis(id, s) }, "Avis et satisfaction")),
     h("div", { class: "carte", style: null },
       h("h2", {}, "Apprenants"),
@@ -874,23 +1112,45 @@ async function ecranAppel(id, d) {
   const jour = aujourdhui();
   const choisie = jour < debut ? debut : jour > fin ? fin : jour;
   const zone = h("div");
+  let dateChargee;
+  let requete = 0;
+  const dateSeance = h("input", { name: "date", type: "date", value: choisie, min: debut, max: fin, required: true });
   const charger = async (date) => {
-    const saisies = await api("GET", `/sessions/${id}/presences?date=${date}`);
+    const numero = ++requete;
+    dateChargee = undefined;
+    zone.replaceChildren(h("p", { role: "status" }, "Chargement des présences…"));
+    if (!dateSeance.checkValidity()) return;
+    let saisies;
+    try {
+      saisies = await api("GET", `/sessions/${id}/presences?date=${date}`);
+    } catch (erreur) {
+      if (numero === requete && erreur.code !== "obsolete" && erreur.code !== "expire") {
+        zone.replaceChildren(h("p", { class: "erreur", role: "alert" }, texteErreur(erreur)),
+          h("button", { type: "button", class: "discret", onclick: () => charger(date) }, "Réessayer"));
+      }
+      return;
+    }
+    if (numero !== requete || !zone.isConnected) return;
     const present = new Map(saisies.map((p) => [p.inscription_id, p.present]));
     zone.replaceChildren(saisies.length ? h("p", { class: "discret-texte" }, "L'appel de cette date existe déjà : vous pouvez le corriger.") : "",
       ...actifs.map((i) => h("label", { class: "appel" },
         h("input", { type: "checkbox", name: "p", value: i.id, checked: present.get(i.id) ?? false }), i.nom)));
     zone.querySelectorAll("input").forEach((c, n) => { c.checked = present.get(actifs[n].id) ?? false; });
+    dateChargee = date;
   };
+  dateSeance.addEventListener("change", () => charger(dateSeance.value));
   vue(
     h("button", { class: "discret", onclick: () => ecranSession(id) }, "← Retour"),
     h("h1", {}, "Faire l'appel"),
     h("div", { class: "carte" }, formulaire(async (v, f) => {
+      if (dateChargee !== v.date) throw Object.assign(new Error(), { code: "donnees_invalides" });
       const presents = [...f.querySelectorAll("input[name=p]:checked")].map((c) => c.value);
       const r = await api("PUT", `/sessions/${id}/presences`, { date: v.date, presents });
-      ecranSession(id, `Appel enregistré : ${r.presents} présent(s), ${r.absents} absent(s).`);
+      const message = `Appel enregistré : ${r.presents} présent(s), ${r.absents} absent(s).`;
+      if (contexteSessions.id === id) await ecranSessions({ message, retour: true });
+      else await ecranSession(id, message);
     }, [
-      champ("Date de la séance", { name: "date", type: "date", value: choisie, min: debut, max: fin, required: true, onchange: (e) => charger(e.target.value) }),
+      h("label", {}, "Date de la séance", dateSeance),
       zone,
     ], "Enregistrer l'appel")));
   await charger(choisie);
@@ -926,7 +1186,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").cat
 
 /** Sans internet au chargement, seule une caisse déjà ouverte dans cet onglet peut continuer. */
 if (jeton) {
-  ecranAccueil().catch((e) => {
+  ecranAccueil(true).catch((e) => {
     if (e instanceof TypeError && lireLocal(sessionStorage, "smarte.caisse", null)) return ecranCaisse();
     throw e;
   });

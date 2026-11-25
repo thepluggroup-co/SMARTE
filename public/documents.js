@@ -15,10 +15,32 @@ async function telechargerDocument(id, titre) {
   h("a", { href: url, download: titre }).click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
-const envoiCatch = (f) => async (e) => { e.preventDefault(); const z = e.target.querySelector(".message-envoi"); try { await f(e.target); } catch (x) { if (z) z.replaceChildren(h("div", { class: "erreur", role: "alert" }, MESSAGES[x.code] || "L'envoi a échoué.")); } };
+const envoiCatch = (f) => async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  if (form.getAttribute("aria-busy") === "true") return;
+  const zone = form.querySelector(".message-envoi");
+  const bouton = form.querySelector('button[type="submit"]');
+  form.setAttribute("aria-busy", "true");
+  if (bouton) bouton.disabled = true;
+  zone?.replaceChildren(h("p", { role: "status" }, "Envoi en cours…"));
+  try {
+    await f(form);
+    delete form.dataset.saisieModifiee;
+    zone?.replaceChildren();
+  } catch (erreur) {
+    if (erreur.code !== "expire" && erreur.code !== "obsolete") {
+      zone?.replaceChildren(h("div", { class: "erreur", role: "alert" }, MESSAGES[erreur.code] || "L'envoi a échoué."));
+    }
+  } finally {
+    if (bouton) bouton.disabled = false;
+    form.removeAttribute("aria-busy");
+  }
+};
 
-async function ecranDocuments(message, q = "", archives = false) {
+async function ecranDocuments(message, q = filtresEcran("documents", {}).q ?? "", archives = filtresEcran("documents", {}).archives ?? false) {
   const [docs, entites] = await Promise.all([api("GET", `/documents?q=${encodeURIComponent(q)}${archives ? "&archives=true" : ""}`), api("GET", "/entites")]);
+  garderFiltresEcran("documents", { q, archives });
   vue(h("h1", {}, archives ? "Documents archivés" : "Documents"), message ? h("div", { class: "succes", role: "status" }, message) : null,
     h("div", { class: "actions" }, h("input", { type: "search", value: q, placeholder: "Rechercher un titre", "aria-label": "Rechercher un titre", onkeydown: (e) => { if (e.key === "Enter") ecranDocuments(null, e.target.value, archives); } }), h("button", { class: "discret", onclick: () => ecranDocuments(null, q, !archives) }, archives ? "Documents actifs" : "Archives")),
     h("div", { class: "carte" }, docs.length ? docs.map((d) => h("div", { class: "apprenant" }, h("div", { class: "ligne" }, h("span", { class: "nom" }, `${d.titre} · v${d.version}`), h("span", {}, CATEGORIES_DOC.find((c) => c[0] === d.categorie)[1])),
@@ -32,10 +54,12 @@ async function ecranDocuments(message, q = "", archives = false) {
     }) }, h("div", { class: "message-envoi" }), h("div", { class: "grille" }, champ("Titre", { name: "t", required: true }), choix("e", "Entité", entites.map((e) => [e.id, e.nom])), choix("c", "Catégorie", CATEGORIES_DOC)), entreeFichier(), h("button", { type: "submit" }, "Enregistrer"))));
 }
 
-async function ecranAgenda(message, debut = aujourdhui()) {
+async function ecranAgenda(message, debut = filtresEcran("agenda", aujourdhui())) {
+  if (!debut) return;
   const fin = new Date(Date.parse(debut) + 6 * 86400000).toISOString().slice(0, 10);
   const gere = droits.includes("agenda.gerer");
   const [a, entites] = await Promise.all([api("GET", `/agenda?debut=${debut}&fin=${fin}`), gere ? api("GET", "/entites") : []]);
+  garderFiltresEcran("agenda", debut);
   const T = { salle: "Salle", vehicule: "Véhicule", equipement: "Équipement", formateur: "Formateur" };
   vue(h("h1", {}, "Agenda"), message ? h("div", { class: "succes", role: "status" }, message) : null,
     h("label", {}, "Semaine à partir du", h("input", { type: "date", value: debut, onchange: (e) => ecranAgenda(null, e.target.value) })),

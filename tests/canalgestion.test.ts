@@ -12,6 +12,10 @@ describe("canal en ligne : traitement par le personnel", () => {
     const r = await commander(env, b.org, corpsCommande(b, [{ produitId: p, quantite: 2 }]));
     const liste = (await b.api("GET", "/commandes-web")).corps;
     expect(liste).toEqual([expect.objectContaining({ reference: r.corps.reference, statut: "reservee", lieu: "GLOMARI Mall Douala", total_ttc: 51000, colis_id: null })]);
+    expect((await b.api("GET", "/commandes-web/lieux")).corps).toEqual([{ id: b.lieu, nom: "GLOMARI Mall Douala" }]);
+    expect((await b.api("GET", `/commandes-web?statut=reservee&lieu=${b.lieu}`)).corps).toEqual(liste);
+    expect((await b.api("GET", `/commandes-web?aPreparer=true&lieu=${b.lieu}`)).corps).toEqual(liste);
+    expect((await b.api("GET", `/commandes-web?lieu=${b.G}`)).corps).toEqual([]);
     const id = liste[0].id as string;
     const detail = (await b.api("GET", `/commandes-web/${id}`)).corps;
     expect(detail).toMatchObject({ client: "Jean Mbarga", zone: "Akwa", colis: null, moyen_paiement: "a_la_livraison" });
@@ -19,6 +23,7 @@ describe("canal en ligne : traitement par le personnel", () => {
 
     const c = await b.api("POST", `/commandes-web/${id}/confirmer`);
     expect(c.statut).toBe(200);
+    expect((await b.api("GET", "/commandes-web?aPreparer=true")).corps).toEqual([]);
     const colis = (await b.api("GET", "/colis")).corps.find((x: { id: string }) => x.id === c.corps.colis.id);
     expect(colis).toMatchObject({ entite_id: b.G, a_encaisser: 51000, zone: "Akwa", destinataire: "Jean Mbarga" });
     expect((await suivre(env, b.org, r.corps)).corps.colis).toMatchObject({ statut: "prepare" });
@@ -54,10 +59,23 @@ describe("canal en ligne : traitement par le personnel", () => {
     const id = (await b.sql("select id from commandes_web where reference = $1", [r.corps.reference])).rows[0].id as string;
     const magasinier = await utilisateur(env, b.o, "magasinier", b.G);
     expect((await env.api("GET", "/commandes-web", magasinier)).statut).toBe(403);
+    expect((await env.api("GET", "/commandes-web/lieux", magasinier)).statut).toBe(403);
     expect((await env.api("POST", `/commandes-web/${id}/annuler`, magasinier, { motif: "Pas mon rôle" })).statut).toBe(403);
     const autre = await env.nouvelleOrganisation();
     expect((await env.api("GET", `/commandes-web/${id}`, autre.jeton)).statut).toBe(404);
     expect((await env.api("POST", `/commandes-web/${id}/annuler`, autre.jeton, { motif: "Intrusion" })).statut).toBe(404);
     expect((await env.api("GET", "/commandes-web", autre.jeton)).corps).toEqual([]);
+    expect((await env.api("GET", "/commandes-web/lieux", autre.jeton)).corps).toEqual([]);
+    expect((await env.api("GET", `/commandes-web?lieu=${b.lieu}`, autre.jeton)).corps).toEqual([]);
+    const commercial = await utilisateur(env, b.o, "commercial", b.G);
+    expect((await env.api("GET", `/commandes-web/${id}`, commercial)).statut).toBe(200);
+    const moi = (await env.api("GET", "/moi", commercial)).corps;
+    expect(moi.permissionsParEspace).toMatchObject({ formation: [], commerce: expect.arrayContaining(["facturation.voir"]) });
+    const acces = (await b.sql("select id from attributions where utilisateur_id = $1", [moi.id])).rows[0].id;
+    expect((await b.api("DELETE", `/acces/${acces}`)).statut).toBe(204);
+    expect((await env.api("GET", "/moi", commercial)).corps.permissionsParEspace).toEqual({ formation: [], commerce: [] });
+    expect((await env.api("GET", "/commandes-web/lieux", commercial)).statut).toBe(403);
+    expect((await env.api("GET", `/commandes-web/${id}`, commercial)).statut).toBe(403);
+    expect((await env.api("POST", `/commandes-web/${id}/confirmer`, commercial)).statut).toBe(403);
   });
 });

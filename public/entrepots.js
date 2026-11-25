@@ -9,7 +9,7 @@ const COLONNES_IMPORT_STOCK = [
 ];
 const sansAccent = (t) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const valeurStock = (v) => (v === null || v === undefined ? "–" : fcfa(v));
-const tableau = (titres, lignes) => h("div", { class: "defilant" }, h("table", {},
+const tableau = (titres, lignes) => h("div", { class: "defilant", tabindex: "0", role: "region", "aria-label": "Tableau défilant" }, h("table", {},
   h("thead", {}, h("tr", {}, titres.map((t) => h("th", { scope: "col" }, t)))), h("tbody", {}, lignes)));
 /** Les unités de vente d'un article, comme le serveur (src/articles.ts) : base, conditionnements, pièce. */
 function unitesDeProduit(p) {
@@ -101,9 +101,10 @@ const enteteStock = (actif, message) => [h("h1", {}, "Stocks"), ongletsStock(act
 const choixCategoriesStock = (categories) => categories.filter((c) => !c.parent_id && c.actif).flatMap((c) => [[c.id, c.nom], ...categories.filter((x) => x.parent_id === c.id && x.actif).map((x) => [x.id, `${c.nom} › ${x.nom}`])]);
 
 /** État du stock : par entrepôt, par catégorie, par type de colis, avec filtres et téléchargements. */
-async function ecranStocks(message, filtres = {}) {
+async function ecranStocks(message, filtres = filtresEcran("stocks", {})) {
   const q = new URLSearchParams(Object.entries(filtres).filter(([, v]) => v));
   const [e, categories, lieux, marques] = await Promise.all([api("GET", `/entrepots/etat${q.size ? `?${q}` : ""}`), api("GET", "/categories-articles"), entitesPour("achats_stocks"), api("GET", "/marques")]);
+  garderFiltresEcran("stocks", filtres);
   const total = (cle) => e.entrepots.reduce((s, x) => s + (x[cle] ?? 0), 0);
   const valeurTotale = e.entrepots.some((x) => x.valeur === null) ? null : total("valeur");
   const lieuChoisi = lieux.find(([id]) => id === filtres.entiteId)?.[1];

@@ -15,18 +15,22 @@ async function charger(message) {
   let d;
   try {
     const r = await fetch(`/apprendre/${code}`);
-    if (r.status === 409) return zone.replaceChildren(el("div", { class: "carte" }, el("p", { class: "etat rouge" }, "Votre accès est suspendu. Merci de contacter l'organisme.")));
-    if (!r.ok) return zone.replaceChildren(el("div", { class: "carte" }, el("p", { class: "etat rouge" }, "Ce lien n'est pas valide ou l'accès a été retiré.")));
+    if (r.status === 409) return zone.replaceChildren(el("div", { class: "carte" }, el("p", { class: "erreur", role: "alert" }, "Votre accès est suspendu. Merci de contacter l'organisme.")));
+    if (!r.ok) return zone.replaceChildren(el("div", { class: "carte" }, el("p", { class: "erreur", role: "alert" }, "Ce lien n'est pas valide ou l'accès a été retiré.")));
     d = await r.json();
   } catch {
-    return zone.replaceChildren(el("div", { class: "carte" }, el("p", { class: "etat rouge" }, "Connexion impossible. Réessayez.")));
+    return zone.replaceChildren(el("div", { class: "carte" },
+      el("p", { class: "erreur", role: "alert" }, "Connexion impossible."),
+      el("button", { type: "button", class: "discret", onclick: () => charger(message) }, "Réessayer")));
   }
   const echanges = await fetch(`/apprendre/${code}/echanges`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
   const courante = d.lecons.find((l) => l.ouverte && !l.terminee);
   zone.replaceChildren(el("div", {},
     el("h1", {}, d.titre),
     d.description ? el("p", { class: "discret-texte" }, d.description) : null,
-    el("p", {}, `Progression : ${d.progression} %`),
+    el("div", { class: "carte" },
+      el("label", { for: "progression-cours" }, `Progression : ${d.progression} %`),
+      el("progress", { id: "progression-cours", max: 100, value: d.progression })),
     message ? el("div", { class: message.ok ? "succes" : "erreur", role: "status" }, message.texte) : null,
     d.termine ? el("div", { class: "carte" }, el("p", { class: "etat vert" }, "Félicitations, vous avez terminé ce cours.")) : null,
     d.certificat ? certificat(d.certificat) : null,

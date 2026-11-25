@@ -94,10 +94,33 @@ async function ecranSegment(id) {
 }
 
 async function ecranRecherche(q) {
-  const r = await api("GET", `/recherche?q=${encodeURIComponent(q)}`);
+  if (!confirmerNavigation()) return;
+  const depart = ++navigation;
+  const espace = espaceCourant();
+  const titre = h("h1", { tabindex: "-1" }, `Recherche : ${q}`);
+  const zone = h("section", { class: "carte", "aria-label": "Résultats", "aria-busy": "true" },
+    h("p", { role: "status" }, "Recherche en cours…"));
+  vue(titre, zone);
+  const champRecherche = document.querySelector(".recherche-globale");
+  if (champRecherche) champRecherche.value = q;
+  titre.focus({ preventScroll: true });
   const G = { client: "Client", document: "Document", produit: "Produit", session: "Session", ticket: "Ticket" };
-  const ouvrir = { document: (x) => ecranDocument(x.id), ticket: (x) => ecranTicket(x.id) };
-  vue(h("h1", {}, `Recherche : ${q}`), h("div", { class: "carte" }, r.length ? r.map((x) => ouvrir[x.genre] ? h("button", { class: "session", onclick: () => ouvrir[x.genre](x) }, `${G[x.genre]} · ${x.titre} · ${x.detail}`) : h("div", { class: "apprenant" }, `${G[x.genre]} · ${x.titre} · ${x.detail}`)) : h("p", { class: "discret-texte" }, "Aucun résultat.")));
+  const ouvrir = { document: (x) => ecranDocument(x.id), session: (x) => ecranSession(x.id), ticket: (x) => ecranTicket(x.id) };
+  try {
+    const r = await api("GET", `/recherche?${new URLSearchParams({ q, espace })}`);
+    if (depart !== navigation || !zone.isConnected) return;
+    zone.replaceChildren(...(r.length ? r.map((x) => {
+      const texte = [G[x.genre], x.titre, x.detail].filter(Boolean).join(" · ");
+      return ouvrir[x.genre] ? h("button", { class: "session", onclick: () => ouvrir[x.genre](x) }, texte)
+        : h("div", { class: "apprenant" }, texte);
+    }) : [h("p", { class: "discret-texte", role: "status" }, "Aucun résultat dans cet espace.")]));
+  } catch (erreur) {
+    if (erreur.code === "obsolete" || erreur.code === "expire" || !zone.isConnected) return;
+    zone.replaceChildren(h("p", { class: "erreur", role: "alert" }, texteErreur(erreur)),
+      h("button", { class: "discret", onclick: () => ecranRecherche(q) }, "Réessayer"));
+  } finally {
+    zone.removeAttribute("aria-busy");
+  }
 }
 
 async function ecranNotifications() {

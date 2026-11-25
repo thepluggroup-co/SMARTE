@@ -8,13 +8,15 @@ const STATUTS_TRANSFERT = { demande: "À expédier", expedie: "À réceptionner"
 const MOYENS = [["especes", "Espèces"], ["mtn_momo", "MTN Mobile Money"], ["orange_money", "Orange Money"], ["virement", "Virement"], ["cheque", "Chèque"], ["carte", "Carte"]];
 const quantiteFr = (q) => Number(q).toLocaleString("fr-FR", { maximumFractionDigits: 3 });
 
-async function ecranFacturation(message, type = "facture") {
+async function ecranFacturation(message, type = filtresEcran("facturation", "facture"), retour) {
   const b = await brancheEspace();
   const filtre = b ? `brancheId=${b}` : "";
   const [docs, creances] = await Promise.all([api("GET", `/documents-vente?type=${type}&${filtre}`), api("GET", `/creances?${filtre}`)]);
+  garderFiltresEcran("facturation", type);
   const totalDu = creances.reduce((s, c) => s + c.total, 0);
+  const titre = h("h1", { tabindex: "-1" }, "Facturation");
   vue(
-    h("h1", {}, "Facturation"),
+    titre,
     message ? h("div", { class: "succes", role: "status" }, message) : null,
     h("div", { class: "actions" },
       Object.entries({ facture: "Factures", devis: "Devis", avoir: "Avoirs" }).map(([t, l]) =>
@@ -22,7 +24,10 @@ async function ecranFacturation(message, type = "facture") {
       droits.includes("facturation.gerer") ? h("button", { class: "discret", onclick: ecranNouveauDocument }, "Nouveau document") : null,
       droits.includes("catalogue.gerer") ? h("button", { class: "discret", onclick: () => ecranCatalogue() }, "Catalogue") : null,
       droits.includes("facturation.administrer") ? h("button", { class: "discret", onclick: () => ecranIdentites() }, "Identité légale") : null),
-    h("div", { class: "carte" }, docs.length ? docs.map((d) => h("button", { class: "session", onclick: () => ecranDocument(d.id) },
+    h("div", { class: "carte" }, docs.length ? docs.map((d) => h("button", { class: "session", id: `facturation-${d.id}`, onclick: () => {
+      garderFiltresEcran("retourFacturation", { id: d.id, scroll: window.scrollY });
+      return ecranDocument(d.id);
+    } },
       h("div", { class: "ligne" },
         h("span", { class: "nom" }, `${d.numero || "Brouillon"} : ${d.client}`),
         d.reste === 0 ? h("span", { class: "pastille ok" }, "Soldée")
@@ -36,6 +41,10 @@ async function ecranFacturation(message, type = "facture") {
         h("tbody", {}, creances.map((c) => h("tr", {}, h("td", {}, c.client), [c.non_echu, c.de_1_a_30, c.de_31_a_60, c.plus_de_60, c.total].map((v) => h("td", { class: "nombre" }, Number(v).toLocaleString("fr-FR"))))))))
         : h("p", { class: "discret-texte" }, "Aucune créance.")),
   );
+  if (retour) {
+    window.scrollTo(0, retour.scroll);
+    (document.getElementById(`facturation-${retour.id}`) || titre).focus({ preventScroll: true });
+  }
 }
 
 async function ecranNouveauDocument() {
@@ -122,7 +131,10 @@ async function ecranDocument(id, message) {
   } }, texte);
   vue(
     h("div", { class: "actions pas-imprimer" },
-      h("button", { class: "discret", onclick: () => ecranFacturation(undefined, d.type) }, "← Retour"),
+      h("button", { class: "discret", onclick: () => {
+        const retour = filtresEcran("retourFacturation", null);
+        return ecranFacturation(undefined, d.type, retour?.id === id ? retour : null);
+      } }, "← Retour"),
       !brouillon ? h("button", { class: "discret", onclick: () => window.print() }, "Imprimer") : null,
       !brouillon && d.type === "facture" && droits.includes("stocks.gerer") ? h("button", { class: "discret", onclick: () => ecranPreparation(d.id) }, "Préparer la commande") : null),
     message ? h("div", { class: "succes pas-imprimer", role: "status" }, message) : null,

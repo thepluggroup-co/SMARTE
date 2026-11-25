@@ -35,11 +35,29 @@ async function ecranPreparation(documentId) {
 }
 
 let chartes = null;
+function couleurLisible(couleur) {
+  if (!/^#[0-9a-f]{6}$/i.test(couleur || "")) return null;
+  const composantes = couleur.slice(1).match(/../g).map((c) => parseInt(c, 16));
+  const poids = [0.2126, 0.7152, 0.0722];
+  const luminance = (rgb) => rgb.reduce((somme, valeur, i) => {
+    const v = valeur / 255;
+    return somme + poids[i] * (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  }, 0);
+  const c = [...composantes];
+  while (1.05 / (luminance(c) + 0.05) < 4.5) {
+    for (let i = 0; i < c.length; i++) c[i] = Math.floor(c[i] * 0.9);
+  }
+  return `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
 async function appliquerCharte() {
   try {
+    const espace = espaceCourant();
+    const depart = navigation;
     if (!chartes) chartes = await api("GET", "/entites-chartes");
-    const c = chartes.find((e) => e.code === (dansEspace("formation") ? "GTA" : "GLOMARI"));
-    if (c?.couleur) document.documentElement.style.setProperty("--marine", c.couleur);
+    if (depart !== navigation || espace !== espaceCourant()) return;
+    const c = chartes.find((e) => e.code === (espace === "formation" ? "GTA" : "GLOMARI"));
+    const couleur = couleurLisible(c?.couleur);
+    if (couleur) document.documentElement.style.setProperty("--marine", couleur);
     else document.documentElement.style.removeProperty("--marine");
   } catch { /* la couleur par défaut reste */ }
 }

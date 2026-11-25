@@ -476,22 +476,44 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
 
   // ---------- Traitement par le personnel ----------
 
-  app.get<{ Querystring: { statut?: string } }>("/commandes-web", {
-    schema: { querystring: { type: "object", properties: { statut: { type: "string", enum: STATUTS } } } },
+  app.get("/commandes-web/lieux", async (req) =>
+    protege(req, async (ctx) => {
+      await exiger(ctx, "facturation.voir");
+      const branches = (await entitesAccessibles(ctx.client, ctx.utilisateurId, "facturation.voir")).map((e) => e.id);
+      return (await ctx.client.query(
+        `select distinct w.lieu_id as id, coalesce(l.nom_public, e.nom) as nom
+         from commandes_web w
+         join entites e on e.id = w.lieu_id
+         left join config_canal k on k.entite_id = w.entite_id
+         left join lieux_canal l on l.config_id = k.id and l.entite_id = w.lieu_id
+         where w.entite_id = any($1::uuid[])
+         order by nom, id`,
+        [branches],
+      )).rows;
+    }),
+  );
+
+  app.get<{ Querystring: { statut?: string; lieu?: string; aPreparer?: boolean } }>("/commandes-web", {
+    schema: { querystring: { type: "object", properties: {
+      statut: { type: "string", enum: STATUTS }, lieu: uuid, aPreparer: { type: "boolean" },
+    } } },
   }, async (req) =>
     protege(req, async (ctx) => {
       await exiger(ctx, "facturation.voir");
       await expirerCommandesWeb(ctx.client);
       const branches = (await entitesAccessibles(ctx.client, ctx.utilisateurId, "facturation.voir")).map((e) => e.id);
       return (await ctx.client.query(
-        `select w.id, w.reference, w.statut, l.nom_public as lieu, w.nom_client, w.telephone, w.mode_livraison, w.moyen_paiement,
+        `select w.id, w.reference, w.statut, coalesce(l.nom_public, e.nom) as lieu, w.nom_client, w.telephone, w.mode_livraison, w.moyen_paiement,
            w.total_ttc, w.expire_le, w.colis_id, w.cree_le
          from commandes_web w
+         left join entites e on e.id = w.lieu_id
          left join config_canal k on k.entite_id = w.entite_id
          left join lieux_canal l on l.config_id = k.id and l.entite_id = w.lieu_id
          where w.entite_id = any($1::uuid[]) and ($2::text is null or w.statut = $2)
+           and ($3::uuid is null or w.lieu_id = $3)
+           and (not $4::boolean or (w.statut = 'reservee' and w.colis_id is null))
          order by (w.statut = 'reservee' and w.colis_id is null) desc, w.cree_le desc limit 300`,
-        [branches, req.query.statut ?? null],
+        [branches, req.query.statut ?? null, req.query.lieu ?? null, req.query.aPreparer ?? false],
       )).rows;
     }),
   );
@@ -499,12 +521,13 @@ export function enregistrerCanalEnLigne(app: FastifyInstance, pool: pg.Pool, out
   app.get<{ Params: { id: string } }>("/commandes-web/:id", { schema: { params: paramId } }, async (req) =>
     protege(req, async (ctx) => {
       const { rows: [w] } = await ctx.client.query(
-        `select w.id, w.entite_id, w.reference, w.statut, w.lieu_id, l.nom_public as lieu, w.tiers_id, t.nom as client, w.nom_client, w.telephone,
+        `select w.id, w.entite_id, w.reference, w.statut, w.lieu_id, coalesce(l.nom_public, e.nom) as lieu, w.tiers_id, t.nom as client, w.nom_client, w.telephone,
            w.mode_livraison, w.zone_id, z.nom as zone, w.point_relais_id, r.nom as point_relais, w.adresse, w.note, w.moyen_paiement, w.canal,
            w.frais_livraison, w.total_ht, w.total_ttc, w.expire_le, w.motif, w.traite_par, w.traite_le, w.cree_le,
            case when x.id is null then null else json_build_object('id', x.id, 'numero', x.numero, 'statut', x.statut, 'a_encaisser', x.a_encaisser) end as colis
          from commandes_web w
          join tiers t on t.id = w.tiers_id
+         left join entites e on e.id = w.lieu_id
          left join config_canal k on k.entite_id = w.entite_id
          left join lieux_canal l on l.config_id = k.id and l.entite_id = w.lieu_id
          left join zones_livraison z on z.id = w.zone_id

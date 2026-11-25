@@ -9,61 +9,112 @@ const enAttenteWeb = (c) => c.statut === "reservee" && !c.colis_id;
 const pastilleWeb = (c) => ["annulee", "expiree", "a_rembourser"].includes(c.statut) ? "pastille retard" : enAttenteWeb(c) || c.statut === "payee" ? "pastille attente" : "pastille ok";
 const dateHeureFr = (d) => new Date(d).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 
-async function ecranCommandesEnLigne(message, filtre = "") {
-  const commandes = await api("GET", `/commandes-web${filtre ? `?statut=${filtre}` : ""}`);
+let filtresCommandesWeb = { statut: "", lieu: "" };
+
+async function ecranCommandesEnLigne(message, filtre = filtresCommandesWeb.statut, lieu = filtresCommandesWeb.lieu, retour) {
+  const q = new URLSearchParams();
+  if (filtre === "a_preparer") q.set("aPreparer", "true");
+  else if (filtre) q.set("statut", filtre);
+  if (lieu) q.set("lieu", lieu);
+  const [commandes, lieux] = await Promise.all([
+    api("GET", `/commandes-web${q.size ? `?${q}` : ""}`),
+    api("GET", "/commandes-web/lieux"),
+  ]);
+  filtresCommandesWeb = { statut: filtre, lieu };
+  garderContexteNavigation();
   const gere = droits.includes("facturation.gerer");
-  vue(h("h1", {}, "Commandes en ligne"), message ? h("div", { class: "succes", role: "status" }, message) : null,
+  const filtrer = (statut, magasin) => {
+    navigation += 1;
+    return ecranCommandesEnLigne(null, statut, magasin);
+  };
+  const titre = h("h1", { tabindex: "-1" }, "Commandes en ligne");
+  vue(titre, message ? h("div", { class: "succes", role: "status" }, message) : null,
     h("div", { class: "actions" },
-      h("label", {}, "Statut ", h("select", { onchange: (e) => ecranCommandesEnLigne(null, e.target.value) }, h("option", { value: "" }, "Tous"),
+      h("label", {}, "Statut ", h("select", { onchange: (e) => filtrer(e.target.value, lieu) }, h("option", { value: "" }, "Tous"),
+        h("option", { value: "a_preparer", selected: filtre === "a_preparer" }, "À préparer"),
         Object.entries(STATUTS_WEB).map(([code, libelle]) => h("option", { value: code, selected: code === filtre }, libelle)))),
+      h("label", {}, "Magasin ", h("select", { onchange: (e) => filtrer(filtre, e.target.value) },
+        h("option", { value: "" }, "Tous les magasins"),
+        lieux.map((x) => h("option", { value: x.id, selected: x.id === lieu }, x.nom)))),
       droits.includes("tresorerie.voir") || droits.includes("facturation.voir") ? h("button", { class: "discret", onclick: () => ecranPaiementsEnLigne() }, "Paiements en ligne") : null,
       h("button", { class: "discret", onclick: () => ecranPrecommandes() }, "Précommandes"),
       droits.includes("facturation.administrer") ? h("button", { class: "discret", onclick: () => ecranBoutiqueEnLigne() }, "Réglages de la boutique") : null),
-    h("div", { class: "carte" }, commandes.length ? commandes.map((c) => carteCommandeWeb(c, gere, filtre)) : h("p", { class: "discret-texte" }, "Aucune commande.")));
+    h("div", { class: "carte" }, commandes.length ? commandes.map((c) => carteCommandeWeb(c, gere, async (avis) => {
+      await ecranCommandesEnLigne(avis, filtre, lieu, { id: c.id, scroll: window.scrollY });
+    })) : h("p", { class: "discret-texte" }, "Aucune commande.")));
+  if (retour) {
+    window.scrollTo(0, retour.scroll);
+    (document.getElementById(`commande-web-${retour.id}`) || titre).focus({ preventScroll: true });
+  }
 }
 
-function carteCommandeWeb(c, gere, filtre) {
-  const detail = h("div");
-  let charge = false;
+function carteCommandeWeb(c, gere, actualiser) {
   const ouvrir = async (e) => {
-    if (!e.currentTarget.open || charge) return;
-    charge = true;
-    const d = await api("GET", `/commandes-web/${c.id}`);
-    const livraison = [MODES_WEB[d.mode_livraison], d.zone, d.point_relais, d.adresse].filter(Boolean).join(" · ");
-    detail.replaceChildren(
-      h("p", {}, `${d.client} · ${d.telephone}`),
-      h("p", { class: "discret-texte" }, [d.lieu, livraison, MOYENS_WEB[d.moyen_paiement]].filter(Boolean).join(" · ")),
-      h("ul", {}, d.lignes.map((l) => h("li", {}, `${l.nom} × ${quantiteFr(l.quantite)} : ${fcfa(l.total_ttc)}`))),
-      d.frais_livraison ? h("p", {}, `Livraison : ${fcfa(d.frais_livraison)}`) : null,
-      d.note ? h("p", {}, d.note) : null,
-      d.motif ? h("p", { class: "discret-texte" }, `Motif : ${d.motif}`) : null,
-      d.colis ? h("p", {}, `Colis ${d.colis.numero} (${d.colis.statut}), à encaisser : ${fcfa(d.colis.a_encaisser)}`) : null,
-      d.facture ? h("p", {}, `Facture ${d.facture}`) : null,
-      (d.paiements || []).length ? h("ul", { class: "discret-texte" }, d.paiements.map((x) => h("li", {},
-        `${MOYENS_WEB[x.moyen]} ${x.reference_prestataire} : ${fcfa(x.montant)}, ${PAIEMENTS_WEB[x.statut]}${x.traite_le ? ` le ${dateHeureFr(x.traite_le)}` : ""}`))) : null,
-      gere && d.statut === "payee" ? h("div", { class: "actions" }, h("button", {
-        onclick: async () => {
-          const r = await api("POST", `/commandes-web/${c.id}/terminer`);
-          ecranCommandesEnLigne(`Vente terminée : facture ${r.facture}.`, filtre);
-        },
-      }, "Terminer la vente")) : null,
-      gere && d.statut === "reservee" ? h("div", { class: "actions" },
-        d.moyen_paiement === "a_la_livraison" && !d.colis ? h("button", {
+    const declencheur = e.currentTarget;
+    const detail = h("div", {}, h("p", { role: "status" }, "Chargement de la commande…"));
+    const dialogue = h("dialog", { class: "fiche-laterale", "aria-label": `Commande ${c.reference}` },
+      h("div", { class: "ligne" }, h("h2", {}, `Commande ${c.reference}`),
+        h("button", { type: "button", class: "discret", autofocus: true, onclick: () => fermer() }, "Fermer")), detail);
+    const fermer = (enregistree = false) => {
+      if (!enregistree && !confirmerNavigation(dialogue)) return;
+      dialogue.close();
+      dialogue.remove();
+      if (declencheur.isConnected) declencheur.focus({ preventScroll: true });
+    };
+    dialogue.addEventListener("cancel", (ev) => {
+      ev.preventDefault();
+      fermer();
+    });
+    declencheur.closest("main").append(dialogue);
+    dialogue.showModal();
+    try {
+      const d = await api("GET", `/commandes-web/${c.id}`);
+      if (!dialogue.open) return;
+      const relire = async (avis) => {
+        fermer(true);
+        await actualiser(avis);
+      };
+      const livraison = [MODES_WEB[d.mode_livraison], d.zone, d.point_relais, d.adresse].filter(Boolean).join(" · ");
+      detail.replaceChildren(
+        h("p", {}, `${d.client} · ${d.telephone}`),
+        h("p", { class: "discret-texte" }, [d.lieu, livraison, MOYENS_WEB[d.moyen_paiement]].filter(Boolean).join(" · ")),
+        h("ul", {}, d.lignes.map((l) => h("li", {}, `${l.nom} × ${quantiteFr(l.quantite)} : ${fcfa(l.total_ttc)}`))),
+        d.frais_livraison ? h("p", {}, `Livraison : ${fcfa(d.frais_livraison)}`) : null,
+        d.note ? h("p", {}, d.note) : null,
+        d.motif ? h("p", { class: "discret-texte" }, `Motif : ${d.motif}`) : null,
+        d.colis ? h("p", {}, `Colis ${d.colis.numero} (${d.colis.statut}), à encaisser : ${fcfa(d.colis.a_encaisser)}`) : null,
+        d.facture ? h("p", {}, `Facture ${d.facture}`) : null,
+        (d.paiements || []).length ? h("ul", { class: "discret-texte" }, d.paiements.map((x) => h("li", {},
+          `${MOYENS_WEB[x.moyen]} ${x.reference_prestataire} : ${fcfa(x.montant)}, ${PAIEMENTS_WEB[x.statut]}${x.traite_le ? ` le ${dateHeureFr(x.traite_le)}` : ""}`))) : null,
+        gere && d.statut === "payee" ? h("div", { class: "actions" }, h("button", {
           onclick: async () => {
-            const r = await api("POST", `/commandes-web/${c.id}/confirmer`);
-            ecranCommandesEnLigne(`Commande confirmée : colis ${r.colis.numero} créé, à encaisser à la livraison.`, filtre);
+            const r = await api("POST", `/commandes-web/${c.id}/terminer`);
+            await relire(`Vente terminée : facture ${r.facture}.`);
           },
-        }, "Confirmer") : null,
-        h("details", {}, h("summary", {}, "Annuler"), formulaire(async (v) => {
-          await api("POST", `/commandes-web/${c.id}/annuler`, { motif: v.m.trim() });
-          ecranCommandesEnLigne("Commande annulée : le stock est remis en vente.", filtre);
-        }, [champ("Motif", { name: "m", required: true, minlength: 3, maxlength: 500 })], "Confirmer l'annulation"))) : null);
+        }, "Terminer la vente")) : null,
+        gere && d.statut === "reservee" ? h("div", { class: "actions" },
+          d.moyen_paiement === "a_la_livraison" && !d.colis ? h("button", {
+            onclick: async () => {
+              const r = await api("POST", `/commandes-web/${c.id}/confirmer`);
+              await relire(`Commande confirmée : colis ${r.colis.numero} créé, à encaisser à la livraison.`);
+            },
+          }, "Confirmer") : null,
+          h("details", {}, h("summary", {}, "Annuler"), formulaire(async (v) => {
+            await api("POST", `/commandes-web/${c.id}/annuler`, { motif: v.m.trim() });
+            await relire("Commande annulée : le stock est remis en vente.");
+          }, [champ("Motif", { name: "m", required: true, minlength: 3, maxlength: 500 })], "Confirmer l'annulation"))) : null);
+    } catch (erreur) {
+      if (dialogue.open && erreur.code !== "obsolete" && erreur.code !== "expire") {
+        detail.replaceChildren(h("p", { class: "erreur", role: "alert" }, texteErreur(erreur)));
+      }
+    }
   };
-  return h("details", { class: "apprenant", ontoggle: ouvrir },
-    h("summary", {}, h("span", { class: "nom" }, `${c.reference} : ${c.nom_client} · ${fcfa(c.total_ttc)}`), " ",
+  return h("div", { class: "apprenant ligne commande-web" },
+    h("div", {}, h("span", { class: "nom" }, `${c.reference} : ${c.nom_client} · ${fcfa(c.total_ttc)}`), " ",
       h("span", { class: pastilleWeb(c) }, c.colis_id && c.statut === "reservee" ? "Confirmée" : STATUTS_WEB[c.statut]),
+      c.lieu ? h("div", { class: "discret-texte" }, c.lieu) : null,
       enAttenteWeb(c) ? h("span", { class: "discret-texte" }, ` jusqu'au ${dateHeureFr(c.expire_le)}`) : null),
-    detail);
+    h("button", { id: `commande-web-${c.id}`, class: "discret", "aria-label": `Ouvrir la commande ${c.reference}`, onclick: ouvrir }, "Ouvrir"));
 }
 
 /** Rapprochement : ce que l'opérateur a versé ce jour-là, par moyen, avec facture et portefeuille. */

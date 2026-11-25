@@ -144,11 +144,30 @@ async function ecranTableauDeBord(choix) {
   const libellePeriode = reglage.code === "perso" ? `du ${dateFr(bornes.du)} au ${dateFr(bornes.au)}` : PERIODES_TDB.find((p) => p[0] === reglage.code)[1].toLowerCase();
   const f = t.finances, v = t.ventes, fo = t.formation, a = t.achats, dp = t.depenses, re = t.resume;
   const vide = !f && !v && !fo && !t.stocks && !a;
+  const droits = droitsDansEspace(espace);
+  const raccourcis = espace === "formation"
+    ? [
+      droits.includes("formations.voir") && ["Sessions du jour", fo?.sessions_en_cours, "Formations", "Voir les sessions du jour", () => ecranSessions({ periodeChoisie: "jour" })],
+      droits.includes("formations.voir") && droits.includes("presences.saisir") && ["Appel", null, "Formations", "Présences à saisir", () => ecranSessions({ periodeChoisie: "appel" })],
+      droits.includes("formations.voir") && ["Inscriptions", null, "Formations", "Voir les sessions avec inscrits", () => ecranSessions({ periodeChoisie: "inscrits" })],
+      droits.includes("apprentissage.voir") && ["Cours en ligne", null, "Cours en ligne", "Voir les cours", ecranCours],
+    ]
+    : [
+      droits.includes("facturation.voir") && ["Commandes en ligne", null, "Commandes en ligne", "Commandes à préparer", () => ecranCommandesEnLigne(null, "a_preparer")],
+      droits.includes("stocks.voir") && ["Alertes de stock", t.stocks?.alertes, "Stocks", "Voir les articles sous le seuil", () => ecranStocks(null, { etat: "alerte" })],
+      droits.includes("caisse.vendre") && ["Caisse", null, "Caisse", "Ouvrir la caisse", ecranCaisse],
+    ];
 
   vue(
     h("div", { class: "entete-tdb" },
       logo ? h("img", { src: logo, alt: `Logo ${nomEspace}`, class: "logo-tdb" }) : null,
       h("div", {}, h("h1", {}, `Tableau de bord ${nomEspace}`), h("p", { class: "discret-texte" }, `Période : ${libellePeriode}. Mis à jour à ${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.`))),
+    raccourcis.some(Boolean) ? h("section", { class: "raccourcis-tdb pas-imprimer", "aria-label": "Accès rapides" },
+      raccourcis.filter(Boolean).map(([titre, nombre, destination, libelle, ouvrir], i) =>
+        h("article", { class: "carte raccourci-tdb" },
+          h("h2", {}, titre),
+          typeof nombre === "number" ? h("p", { class: "grand" }, String(nombre)) : null,
+          h("button", { class: i ? "discret" : null, onclick: () => ouvrirDestination(destination, ouvrir) }, libelle)))) : null,
     h("div", { class: "carte pas-imprimer filtres-tdb" },
       h("div", { class: "actions" }, PERIODES_TDB.map(([code, nom]) => h("button", { class: code === reglage.code ? "" : "discret", "aria-pressed": String(code === reglage.code), onclick: () => ecranTableauDeBord({ code }) }, nom))),
       formulaire(async (x) => ecranTableauDeBord({ code: "perso", du: x.du, au: x.au }), [h("div", { class: "grille" },
@@ -184,9 +203,7 @@ async function ecranTableauDeBord(choix) {
       v ? tuileTdb(fcfa(v.panier), "panier moyen") : null,
       t.creances ? tuileTdb(fcfa(t.creances.montant), `à encaisser sur ${t.creances.factures} facture${t.creances.factures > 1 ? "s" : ""}`) : null,
       t.stocks ? tuileTdb(fcfa(t.stocks.valeur), "valeur du stock au coût") : null,
-      t.stocks ? tuileTdb(String(t.stocks.alertes), "articles sous le seuil d'alerte", null, t.stocks.alertes ? "perte" : "") : null,
       fo ? tuileTdb(String(fo.inscriptions), "inscriptions", variationTdb(fo.inscriptions, fo.inscriptions_prec)) : null,
-      fo ? tuileTdb(String(fo.sessions_en_cours), "sessions en cours aujourd'hui") : null,
       fo && fo.remplissage !== null ? tuileTdb(`${fo.remplissage} %`, "remplissage des sessions") : null),
 
     h("div", { class: "grille-tdb" },
@@ -247,7 +264,9 @@ async function maPhoto() {
 
 /** Après chaque écran : logo en tête de page et sur chaque document à imprimer, photo sur le bouton du compte. */
 async function poserEntete() {
+  const barre = document.querySelector("header.barre");
   const [logo, photo] = await Promise.all([logoEspace(), maPhoto()]);
+  if (!barre?.isConnected) return;
   const marque = document.querySelector("header.barre strong");
   if (marque && logo && !marque.querySelector("img")) marque.prepend(h("img", { src: logo, alt: "", class: "logo-barre" }));
   if (logo) for (const d of document.querySelectorAll(".document")) if (!d.querySelector(":scope > .logo-document")) d.prepend(h("img", { src: logo, alt: "Logo", class: "logo-document" }));

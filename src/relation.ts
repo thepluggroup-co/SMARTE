@@ -422,7 +422,9 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
     return reponse.status(201).send(k);
   });
 
-  app.get("/tickets", async (req) =>
+  app.get<{ Querystring: { branche?: string } }>("/tickets", {
+    schema: { querystring: { type: "object", properties: { branche: uuid } } },
+  }, async (req) =>
     protege(req, async (ctx) => {
       await exiger(ctx, "support.voir");
       const { rows } = await ctx.client.query(
@@ -430,8 +432,9 @@ export function enregistrerRelation(app: FastifyInstance, outils: Outils): void 
            k.statut in ('ouvert', 'en_cours') and k.echeance < now() as en_retard
          from tickets k join tiers t on t.id = k.tiers_id left join utilisateurs u on u.id = k.assigne_a
          where k.entite_id = any($1::uuid[])
+           and ($2::uuid is null or entite_branche(k.entite_id) = $2)
          order by k.statut in ('resolu', 'ferme'), k.echeance limit 500`,
-        [await idsAccessibles(ctx, "support.voir")],
+        [await idsAccessibles(ctx, "support.voir"), req.query.branche ?? null],
       );
       return rows;
     }),

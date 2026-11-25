@@ -158,6 +158,12 @@ describe("socle", () => {
     expect((await env.api("GET", "/recherche?q=%25%25", o.jeton)).corps).toEqual([]);
     const gta = await compte(o, "commercial", o.entites.GTA!);
     expect((await env.api("GET", "/recherche?q=mbarga", gta.jeton)).corps).toEqual([]);
+    await env.api("POST", "/tiers", o.jeton, { type: "personne", nom: "Mbarga GTA", entiteId: o.entites.GTA! });
+    expect((await env.api("GET", "/recherche?q=mbarga&espace=formation", o.jeton)).corps)
+      .toEqual([expect.objectContaining({ genre: "client", titre: "Mbarga GTA" })]);
+    expect((await env.api("GET", "/recherche?q=mbarga&espace=commerce", o.jeton)).corps)
+      .toEqual([expect.objectContaining({ genre: "client", titre: "Mbarga Glomari" })]);
+    expect((await env.api("GET", "/recherche?q=mbarga&espace=commerce", gta.jeton)).corps).toEqual([]);
   });
   it("les notifications suivent les droits", async () => {
     const o = await env.nouvelleOrganisation();

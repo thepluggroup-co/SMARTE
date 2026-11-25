@@ -185,15 +185,48 @@ function blocCompteEnLigne(t, retour) {
 const pastilleTicket = (k) => k.en_retard ? h("span", { class: "pastille retard" }, "En retard")
   : h("span", { class: ["resolu", "ferme"].includes(k.statut) ? "pastille ok" : "pastille attente" }, libelle(STATUTS_TICKET, k.statut));
 
-async function ecranSupport(message) {
-  const [tickets, entites] = await Promise.all([api("GET", "/tickets"), entitesPour("support")]);
+const contexteTicketsParEspace = new Map();
+
+async function ecranSupport(message, retour = false) {
+  const espace = espaceCourant();
+  const branche = await brancheEspace();
+  const [tickets, entites] = await Promise.all([
+    api("GET", `/tickets${branche ? `?branche=${encodeURIComponent(branche)}` : ""}`),
+    entitesPour("support"),
+  ]);
+  const contexte = contexteTicketsParEspace.get(espace) || {};
+  const recherche = h("input", { type: "search", value: contexte.recherche || "", placeholder: "Numéro, sujet ou client" });
+  const statut = h("select", {},
+    [["", "Tous"], ...STATUTS_TICKET].map(([code, label]) => h("option", { value: code, selected: contexte.statut === code }, label)));
+  const liste = h("div");
+  const titre = h("h1", { tabindex: "-1" }, "Service client");
+  const afficher = () => {
+    const q = sansAccent(recherche.value).trim();
+    Object.assign(contexte, { recherche: recherche.value, statut: statut.value });
+    contexteTicketsParEspace.set(espace, contexte);
+    garderContexteNavigation();
+    const resultats = tickets.filter((k) => (!statut.value || k.statut === statut.value)
+      && sansAccent(`${k.numero} ${k.sujet} ${k.client}`).includes(q));
+    liste.replaceChildren(...(resultats.length ? resultats.map((k) => h("button", {
+      class: "session", id: `ticket-liste-${k.id}`,
+      onclick: () => {
+        Object.assign(contexte, { id: k.id, scroll: window.scrollY });
+        garderContexteNavigation();
+        return ecranTicket(k.id);
+      },
+    }, h("div", { class: "ligne" }, h("span", { class: "nom" }, `${k.numero} : ${k.sujet}`), pastilleTicket(k)),
+    h("div", { class: "discret-texte" }, `${k.client} · ${k.canal} · À traiter avant ${heure(k.echeance)}${k.assigne ? ` · ${k.assigne}` : ""}`)))
+      : [h("p", { class: "discret-texte", role: "status" }, "Aucun ticket pour ces filtres.")]));
+  };
+  recherche.addEventListener("input", afficher);
+  statut.addEventListener("change", afficher);
+  afficher();
   vue(
-    h("h1", {}, "Service client"),
+    titre,
     message ? h("div", { class: "succes", role: "status" }, message) : null,
     h("div", { class: "carte" }, h("h2", {}, "Tickets"),
-      tickets.length ? tickets.map((k) => h("button", { class: "session", onclick: () => ecranTicket(k.id) },
-        h("div", { class: "ligne" }, h("span", { class: "nom" }, `${k.numero} : ${k.sujet}`), pastilleTicket(k)),
-        h("div", { class: "discret-texte" }, `${k.client} · ${k.canal} · À traiter avant ${heure(k.echeance)}${k.assigne ? ` · ${k.assigne}` : ""}`))) : h("p", { class: "discret-texte" }, "Aucun ticket.")),
+      h("div", { class: "grille pas-imprimer" }, h("label", {}, "Rechercher un ticket", recherche), h("label", {}, "Statut", statut)),
+      liste),
     droits.includes("support.gerer") && entites.length ? h("div", { class: "carte" }, h("h2", {}, "Nouveau ticket"),
       formulaire(async (v, f, zone) => {
         await ficheClient(zone, corpsClient(v), async (tiersId) => {
@@ -211,12 +244,16 @@ async function ecranSupport(message) {
         champ("Message du client", { name: "message", required: true }),
       ], "Créer le ticket")) : null,
   );
+  if (retour) {
+    window.scrollTo(0, contexte.scroll || 0);
+    (document.getElementById(`ticket-liste-${contexte.id}`) || titre).focus({ preventScroll: true });
+  }
 }
 
 async function ecranTicket(id, message) {
   const [k, collaborateurs] = await Promise.all([api("GET", `/tickets/${id}`), api("GET", "/collaborateurs")]);
   vue(
-    h("button", { class: "discret", onclick: () => ecranSupport() }, "← Tous les tickets"),
+    h("button", { class: "discret", onclick: () => ecranSupport(undefined, contexteTicketsParEspace.get(espaceCourant())?.id === id) }, "← Tickets"),
     h("h1", {}, `${k.numero} : ${k.sujet}`),
     h("p", { class: "discret-texte" }, `${k.client}${k.telephone ? ` · ${k.telephone}` : ""} · À traiter avant ${heure(k.echeance)} `, pastilleTicket(k)),
     message ? h("div", { class: "succes", role: "status" }, message) : null,

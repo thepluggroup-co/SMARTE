@@ -104,6 +104,9 @@ describe("service client", () => {
     const heures = (Date.parse(k.corps.echeance) - Date.parse(k.corps.cree_le)) / 3600000;
     expect(heures).toBeCloseTo(4, 1);
     const url = `/tickets/${k.corps.id}`;
+    expect((await env.api("GET", `/tickets?branche=${o.entites.GTA}`, o.jeton)).corps)
+      .toEqual([expect.objectContaining({ id: k.corps.id })]);
+    expect((await env.api("GET", `/tickets?branche=${o.entites.GLOMARI}`, o.jeton)).corps).toEqual([]);
     await env.api("POST", `${url}/messages`, o.jeton, { contenu: "Renvoyé par WhatsApp" });
     expect((await env.api("GET", url, o.jeton)).corps.messages.map((m: { contenu: string }) => m.contenu)).toEqual(["Non reçu", "Renvoyé par WhatsApp"]);
     const r = await env.api("PATCH", url, o.jeton, { statut: "resolu", assigneA: o.adminId });

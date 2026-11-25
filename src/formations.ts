@@ -193,12 +193,18 @@ export function enregistrerFormations(
     protege(req, async (ctx) => {
       await exiger(ctx, "formations.voir");
       const entites = await entitesAccessibles(ctx.client, ctx.utilisateurId, "formations.voir");
+      const entitesAppel = await entitesAccessibles(ctx.client, ctx.utilisateurId, "presences.saisir");
       const { rows } = await ctx.client.query(
         `select s.id, s.code, s.ville, s.lieu, s.mode, s.debut, s.fin, s.capacite, s.statut, p.nom as programme,
-           (select count(*) from inscriptions i where i.session_id = s.id and i.statut = 'active')::int as inscrits
+           (select count(*) from inscriptions i where i.session_id = s.id and i.statut = 'active')::int as inscrits,
+           (s.entite_id = any($2::uuid[]) and s.statut <> 'annulee'
+             and (now() at time zone 'Africa/Douala')::date between s.debut and s.fin
+             and exists (select 1 from inscriptions i where i.session_id = s.id and i.statut = 'active'
+               and not exists (select 1 from presences a where a.inscription_id = i.id
+                 and a.date_seance = (now() at time zone 'Africa/Douala')::date))) as appel_a_saisir
          from sessions_formation s join programmes p on p.id = s.programme_id
          where s.entite_id = any($1::uuid[]) order by s.debut desc limit 200`,
-        [entites.map((e) => e.id)],
+        [entites.map((e) => e.id), entitesAppel.map((e) => e.id)],
       );
       return rows;
     }),

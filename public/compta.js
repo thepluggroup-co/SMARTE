@@ -5,14 +5,20 @@ const nombreFr = (n) => Number(n).toLocaleString("fr-FR");
 
 let branchesCompta = [];
 async function brancheCompta() {
-  branchesCompta = await api("GET", "/compta/branches");
-  const choisie = lireLocal(localStorage, "smarte.branche.compta", "");
-  return branchesCompta.find((b) => b.id === choisie) ?? branchesCompta.find((b) => b.domaine === espaceCourant()) ?? branchesCompta[0];
+  const espace = espaceCourant();
+  branchesCompta = (await api("GET", "/compta/branches")).filter((b) => b.domaine === espace);
+  const choisie = filtresEcran("brancheCompta", "");
+  return branchesCompta.find((b) => b.id === choisie) ?? branchesCompta[0];
 }
 
 function menuCompta(b, actif) {
   const o = [["Tableau", () => ecranCompta()], ["Écritures", () => ecranEcritures(b)], ["Nouvelle écriture", () => ecranSaisie(b)], ["Balance", () => ecranBalance(b)], ["Grand livre", () => ecranGrandLivre(b)], ["États", () => ecranEtats(b)], ["Fournisseurs", () => ecranFournisseurs(b)], ["Immobilisations", () => ecranImmobilisations(b)], ["États officiels", () => ecranEtatsOfficiels(b)], ["DSF", () => ecranDsf(b)], ["Fiscalité", () => ecranFiscal(b)], ["Budget", () => ecranBudget(b)], ["Groupe", () => ecranGroupe(b)], ["Clôtures", () => ecranClotures(b)], ["Plan et réglages", () => ecranPlan(b)]];
-  return h("div", { class: "actions pas-imprimer" }, branchesCompta.length > 1 ? h("select", { "aria-label": "Branche comptable", onchange: (e) => { ecrireLocal(localStorage, "smarte.branche.compta", e.target.value); ecranCompta(); } }, branchesCompta.map((x) => h("option", { value: x.id, selected: x.id === b.id }, x.nom))) : null, o.map(([t, f]) => h("button", { class: t === actif ? "" : "discret", onclick: f }, t)));
+  return h("nav", { class: "actions pas-imprimer", "aria-label": "Comptabilité" },
+    branchesCompta.length > 1 ? h("select", { "aria-label": "Branche comptable", onchange: (e) => {
+      garderFiltresEcran("brancheCompta", e.target.value);
+      return ecranCompta();
+    } }, branchesCompta.map((x) => h("option", { value: x.id, selected: x.id === b.id }, x.nom))) : null,
+    o.map(([t, f]) => h("button", { class: t === actif ? "" : "discret", "aria-current": t === actif ? "page" : null, onclick: f }, t)));
 }
 
 async function ecranCompta(message) {
