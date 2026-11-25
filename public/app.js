@@ -2,7 +2,7 @@
 const racine = document.getElementById("app");
 let jeton = sessionStorage.getItem("jeton");
 let droits = [];
-const estAdmin = () => droits.includes("formations.administrer");
+const estAdmin = () => droitsDansEspace("formation").includes("formations.administrer");
 
 const MESSAGES = {
   identifiants_invalides: "Identifiants incorrects, ou compte temporairement verrouillé.",
@@ -775,8 +775,11 @@ function ecranConnexion() {
 let contexteSessions = {};
 
 async function ecranSessions({ periodeChoisie = contexteSessions.periode, message, retour = false } = {}) {
-  droits = (await api("GET", "/moi")).permissions;
-  if (!droits.includes("formations.voir") || !dansEspace("formation")) return dansEspace("formation") && droits.includes("coaching.voir") ? ecranCoaching() : dansEspace("formation") && droits.includes("universite.voir") ? ecranUniversite() : droits.includes("caisse.vendre") ? ecranCaisse() : droits.includes("stocks.voir") ? ecranStocks() : droits.includes("rh.voir") ? ecranRh() : droits.includes("apprentissage.voir") ? ecranCours() : droits.includes("crm.voir") ? ecranClients() : droits.includes("support.voir") ? ecranSupport() : ecranTaches();
+  const moi = await api("GET", "/moi");
+  droits = moi.permissions;
+  permissionsParEspace = moi.permissionsParEspace;
+  const droitsFormation = droitsDansEspace("formation");
+  if (!droitsFormation.includes("formations.voir") || !dansEspace("formation")) return dansEspace("formation") && droits.includes("coaching.voir") ? ecranCoaching() : dansEspace("formation") && droits.includes("universite.voir") ? ecranUniversite() : droits.includes("caisse.vendre") ? ecranCaisse() : droits.includes("stocks.voir") ? ecranStocks() : droits.includes("rh.voir") ? ecranRh() : droits.includes("apprentissage.voir") ? ecranCours() : droits.includes("crm.voir") ? ecranClients() : droits.includes("support.voir") ? ecranSupport() : ecranTaches();
   const [sessions, programmes, entites] = await Promise.all([
     api("GET", "/sessions"), api("GET", "/programmes"), api("GET", "/entites"),
   ]);
@@ -785,7 +788,7 @@ async function ecranSessions({ periodeChoisie = contexteSessions.periode, messag
     h("option", { value: "", selected: !periodeChoisie }, "Toutes les sessions"),
     h("option", { value: "jour", selected: periodeChoisie === "jour" }, "Sessions du jour"),
     h("option", { value: "inscrits", selected: periodeChoisie === "inscrits" }, "Sessions avec inscrits"),
-    droits.includes("presences.saisir") ? h("option", { value: "appel", selected: periodeChoisie === "appel" }, "Présences à saisir") : null);
+    droitsFormation.includes("presences.saisir") ? h("option", { value: "appel", selected: periodeChoisie === "appel" }, "Présences à saisir") : null);
   const tri = h("select", {},
     h("option", { value: "recent" }, "Plus récentes"),
     h("option", { value: "ancien", selected: contexteSessions.tri === "ancien" }, "Plus anciennes"));
@@ -823,7 +826,7 @@ async function ecranSessions({ periodeChoisie = contexteSessions.periode, messag
 
   const gta = entites.find((e) => e.code === "GTA") || entites[0];
   // Le serveur exige formations.gerer pour créer : on ne montre pas un formulaire qui serait refusé.
-  const peutCreer = droits.includes("formations.gerer");
+  const peutCreer = droitsFormation.includes("formations.gerer");
   vue(
     titre,
     message ? h("div", { class: "succes", role: "status" }, message) : null,
@@ -957,6 +960,8 @@ function ecranDerogation(sessionId, i) {
 async function ecranSession(id, message) {
   const d = await api("GET", `/sessions/${id}/suivi`);
   if (!droits.length) droits = (await api("GET", "/moi")).permissions;
+  const droitsFormation = droitsDansEspace("formation");
+  const peutInscrire = droitsFormation.includes("formations.gerer") && droitsFormation.includes("tiers.creer");
   const s = d.session;
   const formInscription = formulaire(async (v, f, zone) => {
     const corps = {
@@ -985,7 +990,7 @@ async function ecranSession(id, message) {
   vue(
     h("button", { class: "discret pas-imprimer", onclick: () => ecranSessions({ retour: contexteSessions.id === id }) }, "← Sessions"),
     h("h1", {}, s.programme),
-    droits.includes("formations.gerer") ? h("button", { class: "discret pas-imprimer", onclick: () => ecranGestionSession(id, s.code) }, "Coûts, attente, documents et codes") : null,
+    droitsFormation.includes("formations.gerer") ? h("button", { class: "discret pas-imprimer", onclick: () => ecranGestionSession(id, s.code) }, "Coûts, attente, documents et codes") : null,
     h("p", { class: "discret-texte" }, `${s.code} · ${s.ville}${s.lieu ? `, ${s.lieu}` : ""} · du ${dateFr(s.debut)} au ${dateFr(s.fin)}`),
     message ? h("div", { class: "succes", role: "status" }, message) : null,
     h("div", { class: "chiffres" },
@@ -994,17 +999,18 @@ async function ecranSession(id, message) {
       h("div", { class: "chiffre" }, h("b", {}, fcfa(d.totaux.paye)), h("span", {}, "Encaissé")),
       h("div", { class: "chiffre" }, h("b", {}, fcfa(d.totaux.reste)), h("span", {}, "Reste à encaisser"))),
     h("div", { class: "actions pas-imprimer" },
-      droits.includes("presences.saisir") ? h("button", { onclick: () => ecranAppel(id, d) }, "Faire l'appel") : null,
+      droitsFormation.includes("presences.saisir") ? h("button", { onclick: () => ecranAppel(id, d) }, "Faire l'appel") : null,
       h("button", { class: "discret", onclick: () => ecranAvis(id, s) }, "Avis et satisfaction")),
     h("div", { class: "carte", style: null },
       h("h2", {}, "Apprenants"),
       d.inscrits.length ? d.inscrits.map((i) => ligneApprenant(id, i)) : h("p", { class: "discret-texte" }, "Aucun inscrit pour le moment.")),
-    h("div", { class: "carte pas-imprimer" }, h("h2", {}, "Inscrire un apprenant"), formInscription),
+    peutInscrire ? h("div", { class: "carte pas-imprimer" }, h("h2", {}, "Inscrire un apprenant"), formInscription) : null,
     estAdmin() ? formSession(id, s, await api("GET", "/collaborateurs")) : null,
   );
 }
 
 function ligneApprenant(sessionId, i) {
+  const droitsFormation = droitsDansEspace("formation");
   const prochaine = i.echeances.find((e) => e.solde > 0);
   return h("div", { class: "apprenant" },
     h("div", { class: "ligne" },
@@ -1015,11 +1021,11 @@ function ligneApprenant(sessionId, i) {
       prochaine ? ` · Prochaine échéance : ${prochaine.libelle}, ${dateFr(prochaine.date_echeance)}` : ""),
     i.statut !== "active" ? h("div", { class: "discret-texte" }, `Inscription : ${i.statut}`) : null,
     h("div", { class: "actions pas-imprimer" },
-      i.reste > 0 && i.statut === "active" ? h("button", { class: "discret", onclick: () => ecranPaiement(sessionId, i) }, "Encaisser") : null,
+      droitsFormation.includes("paiements.encaisser") && i.reste > 0 && i.statut === "active" ? h("button", { class: "discret", onclick: () => ecranPaiement(sessionId, i) }, "Encaisser") : null,
       h("button", { class: "discret", onclick: () => ecranHistorique(sessionId, i) }, "Historique"),
       i.certificat_id
         ? h("button", { class: "discret", onclick: () => voirCertificat(sessionId, i.id) }, "Voir le certificat")
-        : i.statut === "active" ? h("button", { class: "discret", onclick: () => delivrer(sessionId, i) }, "Délivrer le certificat") : null,
+        : droitsFormation.includes("certificats.delivrer") && i.statut === "active" ? h("button", { class: "discret", onclick: () => delivrer(sessionId, i) }, "Délivrer le certificat") : null,
       estAdmin() && i.statut === "active" ? h("button", { class: "discret", onclick: () => ecranEcheancier(sessionId, i) }, "Modifier l'échéancier") : null,
       estAdmin() && i.statut === "active" && !i.certificat_id ? h("button", { class: "discret", onclick: () => ecranDerogation(sessionId, i) }, "Certificat par exception") : null,
       estAdmin() ? h("button", { class: i.statut === "active" ? "danger" : "discret", onclick: () => changerStatut(sessionId, i) }, i.statut === "active" ? "Retirer de la session" : "Réactiver") : null));
@@ -1081,6 +1087,7 @@ function voirRecu(sessionId, p) {
 
 async function ecranHistorique(sessionId, i) {
   const paiements = await api("GET", `/inscriptions/${i.id}/paiements`);
+  const peutAnnuler = droitsDansEspace("formation").includes("paiements.annuler");
   vue(
     h("button", { class: "discret", onclick: () => ecranSession(sessionId) }, "← Retour"),
     h("h1", {}, `Paiements : ${i.nom}`),
@@ -1095,7 +1102,7 @@ async function ecranHistorique(sessionId, i) {
         h("div", { class: "ligne" }, h("span", { class: "nom" }, `${p.numero_recu} : ${fcfa(p.montant)}`), p.annule_le ? h("span", { class: "pastille attente" }, "Annulé") : null),
         h("div", { class: "discret-texte" }, `${p.moyen}${p.reference ? `, ${p.reference}` : ""} · ${new Date(p.encaisse_le).toLocaleString("fr-FR", { timeZone: "Africa/Douala" })} · ${p.encaisse_par_nom}`),
         p.motif_annulation ? h("div", { class: "discret-texte" }, `Motif : ${p.motif_annulation}`) : null,
-        !p.annule_le ? formAnnulation(sessionId, p) : null)) : h("p", { class: "discret-texte" }, "Aucun paiement.")));
+        peutAnnuler && !p.annule_le ? formAnnulation(sessionId, p) : null)) : h("p", { class: "discret-texte" }, "Aucun paiement.")));
 }
 
 function formAnnulation(sessionId, p) {
